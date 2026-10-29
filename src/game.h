@@ -5,6 +5,7 @@
 #define HOUSES_PER_SIDE 6
 #define INITIAL_SEEDS 4
 #define WIN_SCORE 25
+#define MAX_IDLE_MOVES 100
 
 typedef enum {
 	PLAYER_0 = 0,   
@@ -35,6 +36,7 @@ typedef enum {
 typedef struct {
 	int houses[NUM_HOUSES];
 	int captured[2];   
+	int idle_moves;
 	Side turn;
 	GameStatus status;
 	Winner winner;
