@@ -6,6 +6,7 @@
 #define INITIAL_SEEDS 4
 #define WIN_SCORE 25
 #define MAX_IDLE_MOVES 100
+#define MAX_MOVES 2600
 
 typedef enum {
 	PLAYER_0 = 0,   
@@ -42,14 +43,23 @@ typedef struct {
 	Winner winner;
 } Board;
 
+typedef struct {
+	Board board;
+	Side first_player;
+	unsigned char moves[MAX_MOVES];
+	int num_moves;
+} Game;
+
+int abs_index(Side side, int house);
+Side opponent(Side side);
 void init_board(Board *board, Side first_player);
-
 PlayResult execute_play(Board *board, Side side, int house);
-
 PlayResult check_play(const Board *board, Side side, int house);
-
 int get_valid_plays(const Board *board, Side side, int out[HOUSES_PER_SIDE]);
-
-void print_board(const Board *board);
+void init_game(Game *game, Side first_player);
+PlayResult play_move(Game *game, Side side, int house);
+int replay_game(const Game *game, int upto, Board *out);
+int save_game(const Game *game, const char *path);
+int load_game(Game *game, const char *path);
 
 #endif

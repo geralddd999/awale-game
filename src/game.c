@@ -1,12 +1,7 @@
 #include "game.h"
 #include <stdio.h>
-#include <stdlib.h> 
-#include <time.h>
 
-//TODO: game history
-
-
-static int abs_index(Side side, int house){
+int abs_index(Side side, int house){
 	return (side==PLAYER_0) ? house : house+HOUSES_PER_SIDE;
 }
 
@@ -19,7 +14,7 @@ void init_board(Board *board, Side first_player){
 	board->winner = WINNER_NONE;}
 
 
-static Side opponent(Side side){
+Side opponent(Side side){
 	return (side==PLAYER_0) ? PLAYER_1 : PLAYER_0;
 }
 
@@ -111,7 +106,6 @@ PlayResult execute_play(Board *board, Side side, int house_id){
 	if (check != PLAY_OK) return check;
 
 	int last_index = sow(board, abs_index(side, house_id));
-	//board->captured[side] += capture(board, side, last_index);
 	int gained = capture(board, side, last_index);
 	board->captured[side] += gained;
 	board->idle_moves = (gained > 0) ? 0 : board->idle_moves+1;
@@ -120,42 +114,54 @@ PlayResult execute_play(Board *board, Side side, int house_id){
 
 	return check;
 }
-			
 
-void print_board(const Board *board){
-	for (int i = HOUSES_PER_SIDE-1; i>=0; i--)
-		printf("%d ", board->houses[i]);
-	
-	printf("\n");
 
-	for (int i=HOUSES_PER_SIDE; i<NUM_HOUSES; i++)
-		printf("%d ", board->houses[i]);
-	
-	printf("\n");
+void init_game(Game *game, Side first_player){
+	init_board(&game->board, first_player);
+	game->first_player = first_player;
+	game->num_moves = 0;}
+
+PlayResult play_move(Game *game, Side side, int house_id){
+	PlayResult result = execute_play(&game->board, side, house_id);
+	if (result == PLAY_OK) game->moves[game->num_moves++] = house_id;
+	return result;
 }
 
-int main(){
-	srand(time(NULL));
-	int value = rand();
-
-	Board *board = malloc(sizeof(Board));	
-	if (board == NULL) return 1;
-
-	Side first_player;
-	if (value%2==0) first_player = PLAYER_0;
-	else first_player = PLAYER_1;
-
-	init_board(board, first_player);
-	
-	
-	print_board(board);
-
-	printf("\n");
-	execute_play(board, PLAYER_1, 2);
-
-
-	print_board(board);
-
-	free(board);
+int replay_game(const Game *game, int upto, Board *out){
+	init_board(out, game->first_player);
+	for (int i = 0; i<upto && i<game->num_moves; i++){
+		if (execute_play(out, out->turn, game->moves[i]) != PLAY_OK) return -1;}
 	return 0;
 }
+
+int save_game(const Game *game, const char *path){
+	FILE *file = fopen(path, "w");
+	if (file == NULL) return -1;
+
+	fprintf(file, "%d", game->first_player);
+	for (int i = 0; i<game->num_moves; i++) fprintf(file, " %d", game->moves[i]);
+	fprintf(file, "\n");
+
+	fclose(file);
+	return 0;
+}
+
+int load_game(Game *game, const char *path){
+	FILE *file = fopen(path, "r");
+	int first, house, scanned;
+	if (file == NULL) return -1;
+
+	if (fscanf(file, "%d", &first) != 1 || (first != 0 && first != 1)){
+		fclose(file);
+		return -1;}
+
+	init_game(game, (Side)first);
+	while ((scanned = fscanf(file, "%d", &house)) == 1){
+		if (play_move(game, game->board.turn, house) != PLAY_OK){
+			fclose(file);
+			return -1;}}
+
+	fclose(file);
+	return (scanned == EOF) ? 0 : -1;
+}
+
