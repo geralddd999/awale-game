@@ -115,6 +115,14 @@ PlayResult execute_play(Board *board, Side side, int house_id){
 	return check;
 }
 
+int forfeit(Board *board, Side loser){
+	if (loser != PLAYER_0 && loser != PLAYER_1) return -1;
+	if (board->status == GAME_FINISHED) return -1;
+
+	board->status = GAME_FINISHED;
+	board->winner = (opponent(loser) == PLAYER_0) ? WINNER_PLAYER_0 : WINNER_PLAYER_1;
+	return 0;
+}
 
 void init_game(Game *game, Side first_player){
 	init_board(&game->board, first_player);

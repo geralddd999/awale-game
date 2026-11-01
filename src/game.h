@@ -54,6 +54,7 @@ int abs_index(Side side, int house);
 Side opponent(Side side);
 void init_board(Board *board, Side first_player);
 PlayResult execute_play(Board *board, Side side, int house);
+int forfeit(Board *board, Side loser);
 PlayResult check_play(const Board *board, Side side, int house);
 int get_valid_plays(const Board *board, Side side, int out[HOUSES_PER_SIDE]);
 void init_game(Game *game, Side first_player);

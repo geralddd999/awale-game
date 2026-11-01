@@ -2,12 +2,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#define TMP_FILE "test_history.tmp"
+
 static int passed = 0;
 static int failed = 0;
 
 #define CHECK(cond) do { \
 	if (cond) passed++; \
-	else { failed++; printf("FALHOU %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
+	else { failed++; printf("FAILED %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
 static void empty_board(Board *board, Side turn){
@@ -285,6 +287,150 @@ static void test_random_games(void){
 	CHECK(bad == 0);
 }
 
+static void test_forfeit(void){
+	Board board;
+	Game game;
+	init_board(&board, PLAYER_0);
+
+	CHECK(forfeit(&board, PLAYER_0) == 0);
+	CHECK(board.status == GAME_FINISHED);
+	CHECK(board.winner == WINNER_PLAYER_1);
+	CHECK(board.captured[0] == 0 && board.captured[1] == 0);
+	CHECK(total_seeds(&board) == 48);
+	CHECK(execute_play(&board, PLAYER_0, 0) == PLAY_GAME_OVER);
+
+	CHECK(forfeit(&board, PLAYER_1) == -1);
+	CHECK(board.winner == WINNER_PLAYER_1);
+
+	init_board(&board, PLAYER_0);
+	CHECK(forfeit(&board, PLAYER_1) == 0);
+	CHECK(board.winner == WINNER_PLAYER_0);
+
+	init_board(&board, PLAYER_0);
+	CHECK(forfeit(&board, (Side)5) == -1);
+	CHECK(board.status == GAME_ONGOING && board.winner == WINNER_NONE);
+
+	empty_board(&board, PLAYER_0);
+	board.captured[0] = 23;
+	board.houses[5] = 1;
+	board.houses[6] = 1;
+	board.houses[7] = 5;
+	execute_play(&board, PLAYER_0, 5);
+	CHECK(board.winner == WINNER_PLAYER_0);
+	CHECK(forfeit(&board, PLAYER_0) == -1);
+	CHECK(board.winner == WINNER_PLAYER_0);
+
+	init_game(&game, PLAYER_0);
+	play_move(&game, PLAYER_0, 2);
+	CHECK(forfeit(&game.board, PLAYER_1) == 0);
+	CHECK(game.num_moves == 1);
+	CHECK(play_move(&game, PLAYER_0, 1) == PLAY_GAME_OVER);
+	CHECK(game.num_moves == 1);
+}
+
+static int load_from_text(Game *game, const char *content){
+	FILE *file = fopen(TMP_FILE, "w");
+	int result;
+	if (file == NULL) return -2;
+	fputs(content, file);
+	fclose(file);
+	result = load_game(game, TMP_FILE);
+	remove(TMP_FILE);
+	return result;
+}
+
+static void play_random_game(Game *game, Side first, unsigned *seed){
+	int out[HOUSES_PER_SIDE];
+	init_game(game, first);
+
+	while (game->board.status == GAME_ONGOING){
+		int count = get_valid_plays(&game->board, game->board.turn, out);
+		if (count == 0) break;
+		*seed = (*seed)*1103515245u + 12345u;
+		play_move(game, game->board.turn, out[((*seed)>>16)%count]);}
+}
+
+static void test_history_record(void){
+	Game game;
+	init_game(&game, PLAYER_1);
+
+	CHECK(game.num_moves == 0);
+	CHECK(game.first_player == PLAYER_1);
+	CHECK(game.board.turn == PLAYER_1);
+
+	CHECK(play_move(&game, PLAYER_1, 2) == PLAY_OK);
+	CHECK(play_move(&game, PLAYER_1, 3) == PLAY_NOT_YOUR_TURN);
+	CHECK(play_move(&game, PLAYER_0, 9) == PLAY_INVALID_HOUSE);
+	CHECK(game.num_moves == 1 && game.moves[0] == 2);
+
+	CHECK(play_move(&game, PLAYER_0, 0) == PLAY_OK);
+	CHECK(game.num_moves == 2 && game.moves[1] == 0);
+}
+
+static void test_history_replay(void){
+	Game game;
+	Board expected, replayed;
+	unsigned seed = 777;
+	play_random_game(&game, PLAYER_0, &seed);
+
+	init_board(&expected, game.first_player);
+	for (int step = 0; step <= game.num_moves; step++){
+		CHECK(replay_game(&game, step, &replayed) == 0);
+		CHECK(memcmp(&replayed, &expected, sizeof(Board)) == 0);
+		if (step < game.num_moves) execute_play(&expected, expected.turn, game.moves[step]);}
+
+	CHECK(replay_game(&game, game.num_moves+50, &replayed) == 0);
+	CHECK(memcmp(&replayed, &game.board, sizeof(Board)) == 0);
+}
+
+static void test_history_save_load(void){
+	unsigned seed = 4242;
+
+	for (int n = 0; n < 200; n++){
+		Game original, loaded;
+		play_random_game(&original, (Side)(n%2), &seed);
+
+		CHECK(save_game(&original, TMP_FILE) == 0);
+		CHECK(load_game(&loaded, TMP_FILE) == 0);
+		CHECK(loaded.first_player == original.first_player);
+		CHECK(loaded.num_moves == original.num_moves);
+		CHECK(memcmp(loaded.moves, original.moves, (size_t)original.num_moves) == 0);
+		CHECK(memcmp(&loaded.board, &original.board, sizeof(Board)) == 0);}
+
+	remove(TMP_FILE);
+}
+
+static void test_history_load_invalid(void){
+	Game game;
+
+	CHECK(load_game(&game, "file_that_does_not_exist.tmp") == -1);
+	CHECK(load_from_text(&game, "") == -1);
+	CHECK(load_from_text(&game, "7 1 2\n") == -1);
+	CHECK(load_from_text(&game, "0 9\n") == -1);
+	CHECK(load_from_text(&game, "0 -1\n") == -1);
+	CHECK(load_from_text(&game, "0 0 1 0\n") == -1);
+	CHECK(load_from_text(&game, "1 2 5 abc\n") == -1);
+	CHECK(load_from_text(&game, "0 2 x 3\n") == -1);
+
+	CHECK(load_from_text(&game, "1\n") == 0);
+	CHECK(game.num_moves == 0 && game.first_player == PLAYER_1);
+	CHECK(load_from_text(&game, "1 2 5 0\n") == 0);
+	CHECK(game.num_moves == 3 && game.moves[0] == 2 && game.moves[1] == 5 && game.moves[2] == 0);
+	CHECK(save_game(&game, "no_such_dir/x.tmp") == -1);
+}
+
+static void test_history_limit(void){
+	unsigned seed = 2026;
+	int longest = 0;
+
+	for (int n = 0; n < 5000; n++){
+		Game game;
+		play_random_game(&game, (Side)(n%2), &seed);
+		if (game.num_moves > longest) longest = game.num_moves;}
+
+	CHECK(longest < MAX_MOVES);
+}
+
 int main(void){
 	test_init();
 	test_validation();
@@ -303,7 +449,13 @@ int main(void){
 	test_draw();
 	test_idle_moves();
 	test_random_games();
+	test_forfeit();
+	test_history_record();
+	test_history_replay();
+	test_history_save_load();
+	test_history_load_invalid();
+	test_history_limit();
 
-	printf("%d passaram, %d falharam\n", passed, failed);
+	printf("%d passed, %d failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;
 }
