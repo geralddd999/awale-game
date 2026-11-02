@@ -14,12 +14,12 @@ int main(void){
 
 	while (board.status == GAME_ONGOING){
 		render_board(&board, board.turn, names, buf, sizeof(buf));
-		printf("\n%sHouse (0...5): ", buf);
+		printf("\n%sHouse (1...6): ", buf);
 
 		int house;
-		if (scanf("%d", &house) != 1 || house == -1) break;
+		if (scanf("%d", &house) != 1 || house == 0) break;
 
-		PlayResult result = execute_play(&board, board.turn, house);
+		PlayResult result = execute_play(&board, board.turn, house-1);
 		if (result != PLAY_OK) printf("Player rejected (code %d)\n", result);}
 
 	render_board(&board, PLAYER_0, names, buf, sizeof(buf));

@@ -1,40 +1,44 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -Isrc
+CFLAGS = -Wall -Wextra -g -Isrc -Isrc/common
 BUILD = build
 
-all: test
+GAME_SRC   = src/game.c src/board_view.c
+COMMON_SRC = $(wildcard src/common/*.c)
+SERVER_SRC = $(wildcard src/server/*.c)
+CLIENT_SRC = $(wildcard src/client/*.c)
+HEADERS    = $(wildcard src/*.h src/common/*.h src/server/*.h src/client/*.h)
 
-test: $(BUILD)/test_game
+.PHONY: all test e2e play clean
+
+all: $(BUILD)/server $(BUILD)/client
+
+$(BUILD)/server: $(SERVER_SRC) $(COMMON_SRC) $(GAME_SRC) $(HEADERS) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $(SERVER_SRC) $(COMMON_SRC) $(GAME_SRC)
+
+$(BUILD)/client: $(CLIENT_SRC) $(COMMON_SRC) $(GAME_SRC) $(HEADERS) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $(CLIENT_SRC) $(COMMON_SRC) $(GAME_SRC)
+
+test: $(BUILD)/test_game $(BUILD)/test_linebuf
 	./$(BUILD)/test_game
+	./$(BUILD)/test_linebuf
+
+e2e: all
+	./tests/e2e.sh
 
 play: $(BUILD)/play_local
 	./$(BUILD)/play_local
 
-$(BUILD)/test_game: tests/test_game.c src/game.c src/game.h
-	@mkdir -p $(BUILD)
+$(BUILD)/test_game: tests/test_game.c src/game.c src/game.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tests/test_game.c src/game.c
 
-$(BUILD)/play_local: tests/play_local.c src/game.c src/board_view.c src/game.h src/board_view.h
-	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/play_local.c src/game.c src/board_view.c
-.PHONY: all test play clean
+$(BUILD)/test_linebuf: tests/test_linebuf.c $(COMMON_SRC) src/common/net.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/test_linebuf.c $(COMMON_SRC)
 
-SERVER_SRC = $(wildcard src/server/*.c)
-SERVER_HDR = $(wildcard src/server/*.h)
-CLIENT_SRC = $(wildcard src/client/*.c)
-CLIENT_HDR = $(wildcard src/client/*.h)
-
-all: $(BUILD)/server $(BUILD)/client
-
-$(BUILD)/server: $(SERVER_SRC) $(SERVER_HDR) | $(BUILD)
-	$(CC) $(CFLAGS) -Isrc/server $(SERVER_SRC) -o $@
-
-$(BUILD)/client: $(CLIENT_SRC) $(CLIENT_HDR) | $(BUILD)
-	$(CC) $(CFLAGS) -Isrc/client $(CLIENT_SRC) -o $@
+$(BUILD)/play_local: tests/play_local.c $(GAME_SRC) src/game.h src/board_view.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/play_local.c $(GAME_SRC)
 
 $(BUILD):
 	mkdir -p $@
-
 
 clean:
 	rm -rf $(BUILD)

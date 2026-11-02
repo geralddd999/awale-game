@@ -34,7 +34,7 @@ int render_board(const Board *board, Side viewer, const char *names[2], char *bu
 	append(buf, size, &len, "\n");
 
 	for (int i = 0; i<HOUSES_PER_SIDE; i++)
-		append(buf, size, &len, "  %d ", i);
+		append(buf, size, &len, "  %d ", i+1);
 	append(buf, size, &len, "\n");
 
 	append(buf, size, &len, "%s (%d captured)\n", label[viewer], board->captured[viewer]);
