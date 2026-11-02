@@ -9,7 +9,7 @@ static char users_path[256];
 
 /*
  * One user per line:
- *   name wins losses draws friend1,friend2,... bio
+ *   name wins losses draws bio text until the end of the line
  */
 void users_load(const char *path){
 	char line[2048];
@@ -21,19 +21,14 @@ void users_load(const char *path){
 
 	while (nusers < MAX_USERS && fgets(line, sizeof line, file) != NULL){
 		User *u = &users[nusers];
-		char friends[600];
 		int bio_at = -1;
 
 		line[strcspn(line, "\r\n")] = '\0';
 		memset(u, 0, sizeof(User));
-		if (sscanf(line, "%16s %d %d %d %599s %n", u->name, &u->wins, &u->losses, &u->draws, friends, &bio_at) < 5) continue;
+		if (sscanf(line, "%16s %d %d %d %n", u->name, &u->wins, &u->losses, &u->draws, &bio_at) < 4) continue;
 
 		if (bio_at >= 0) snprintf(u->bio, sizeof u->bio, "%s", line+bio_at);
-		if (strcmp(friends, "-") != 0){
-			for (char *f = strtok(friends, ","); f != NULL; f = strtok(NULL, ","))
-				users_add_friend(u, f);
-		}
-		nusers++;
+		u->id = nusers++;
 	}
 	fclose(file);
 }
@@ -48,10 +43,7 @@ int users_save(void){
 
 	for (int i = 0; i<nusers; i++){
 		User *u = &users[i];
-		fprintf(file, "%s %d %d %d ", u->name, u->wins, u->losses, u->draws);
-		if (u->nfriends == 0) fputc('-', file);
-		for (int f = 0; f<u->nfriends; f++) fprintf(file, "%s%s", f ? "," : "", u->friends[f]);
-		fprintf(file, " %s\n", u->bio);
+		fprintf(file, "%s %d %d %d %s\n", u->name, u->wins, u->losses, u->draws, u->bio);
 	}
 	fclose(file);
 	return rename(tmp, users_path);
@@ -63,34 +55,19 @@ User *users_get(const char *name, int create){
 	}
 	if (!create || nusers == MAX_USERS) return NULL;
 
-	User *u = &users[nusers++];
+	User *u = &users[nusers];
 	memset(u, 0, sizeof(User));
+	u->id = nusers++;
 	snprintf(u->name, sizeof u->name, "%s", name);
 	return u;
 }
 
-int users_is_friend(const User *u, const char *name){
-	for (int i = 0; i<u->nfriends; i++){
-		if (strcmp(u->friends[i], name) == 0) return 1;
-	}
-	return 0;
+User *users_by_id(int id){
+	return (id >= 0 && id < nusers) ? &users[id] : NULL;
 }
 
-int users_add_friend(User *u, const char *name){
-	if (users_is_friend(u, name)) return 0;
-	if (u->nfriends == MAX_FRIENDS) return -1;
-	snprintf(u->friends[u->nfriends++], NAME_LEN+1, "%s", name);
-	return 0;
-}
-
-int users_remove_friend(User *u, const char *name){
-	for (int i = 0; i<u->nfriends; i++){
-		if (strcmp(u->friends[i], name) != 0) continue;
-		memmove(u->friends[i], u->friends[i+1], (u->nfriends-i-1) * sizeof u->friends[0]);
-		u->nfriends--;
-		return 0;
-	}
-	return -1;
+int users_count(void){
+	return nusers;
 }
 
 static int score(const User *u){

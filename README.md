@@ -7,7 +7,7 @@ make                                # build/server and build/client
 make test                           # rules + line framing unit tests
 make e2e                            # end-to-end protocol test against a real server
 
-./build/server [port]               # default port 1977, data stored in ./data
+./build/server [port] [invite_sec]  # default port 1977, invitations expire after 30s, data in ./data
 ./build/client <host> <name> [port]
 ```
 In the client, type commands such as `/create`, `/join alice`, `/start`, `/help`.

@@ -22,11 +22,19 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 ## Lobbies
 - A lobby is named after its **leader**, the user who created it. A client is in at most one lobby.
 - Seat 0 is the leader (`PLAYER_0`). Seat 1 is taken by the first user who joins. Everyone else is a spectator.
-- `/start` (leader only, both seats filled) starts a game. When the game ends, the lobby goes back to waiting, and `/start` again gives a rematch with the first player alternating.
+- `/start` (leader only, both seats filled) starts a game. **The server draws at random who begins each game** and announces it in `EVT START`. When the game ends, the lobby goes back to waiting, and `/start` again gives a rematch.
 - When a player leaves or disconnects during a game, they lose it (`EVT END … left|disconnect`).
 - If seat 1 frees up between games, the oldest spectator takes it (`EVT SEAT`).
 - When the leader leaves or disconnects, the lobby closes (`EVT LOBBY_CLOSED`) and every member goes back to the hall.
-- A private lobby (`/create private`) only accepts users the leader invited or added as friends.
+- A private lobby (`/create private`) can be entered by `/join` only by users the leader added as friends, and by anyone through an accepted invitation.
+
+## Invitations
+- Only the leader invites, and only users who are logged in and **not in a lobby** (`ERR BUSY` otherwise).
+- A user has **at most one pending invitation**. While it is pending, further invitations to them are refused with `ERR BUSY`.
+- The invited user answers with `/accept` or `/deny`. The invitation **expires after 30 seconds** without an answer (`EVT INVITE_EXPIRED`), and then the user can be invited again.
+- An invitation is also cancelled (`EVT INVITE_CANCELLED`) when the inviting lobby closes, when the invited user enters another lobby, or when they disconnect.
+- Accepting = joining the lobby, even if it is private. `/join <leader>` on the inviting lobby counts as accepting too.
+  Friendship is one-way: `/friend bob` lets bob into *your* private lobbies, not you into his.
 - `/say` talks to your current room: your lobby, or the hall if you are not in one.
 
 ## Client → server
@@ -39,6 +47,8 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 | `/join <leader>` | IDLE | `OK join <leader> player\|spectator` |
 | `/leave` | IN_LOBBY | `OK leave` |
 | `/invite <name>` | IN_LOBBY, leader | `OK invite <name>` |
+| `/accept [leader]` | IDLE, invited | same as `/join`: `OK join <leader> player\|spectator` |
+| `/deny [leader]` | IDLE, invited | `OK deny <leader>` |
 | `/kick <name>` | IN_LOBBY, leader | `OK kick <name>` |
 | `/start` | IN_LOBBY, leader | `OK start` |
 | `/move <1-6>` | IN_LOBBY, seated | `OK move <house>` |
@@ -47,7 +57,7 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 | `/msg <name> <text>` | logged | `OK msg <name>` |
 | `/bio set <text>` | logged | `OK bio` |
 | `/bio [name]` | logged | `OK bio <name> <text>` |
-| `/friend [name]` | logged | `OK friend <name>`, or with no name `OK friends <a,b,…\|->` |
+| `/friend [name]` | logged | `OK friend <name>`, or with no name `OK friends <n>` + n × `FRIEND <name> online\|offline` |
 | `/unfriend <name>` | logged | `OK unfriend <name>` |
 | `/history [name]` | logged | `OK history <n>` + n × `GAME <id> <p0> <p1> <winner\|draw> <cap0> <cap1> <moves>` |
 | `/replay <id> [step]` | logged | `OK replay <id> <step> <total> <p0> <p1>` + `BOARD #<id> …` |
@@ -67,8 +77,11 @@ EVT JOINED <leader> <name> player|spectator
 EVT LEFT <leader> <name> left|disconnect|kicked
 EVT SEAT <leader> <name>                   spectator moved to the free seat
 EVT KICKED <leader>
-EVT INVITE <leader>                        answer with /join <leader>
-EVT START <leader> <p0> <p1> 0|1|spectator
+EVT INVITE <leader> <seconds>              answer with /accept or /deny before <seconds>
+EVT INVITE_DENIED <leader> <target>        (to the leader)
+EVT INVITE_EXPIRED <leader> <target>       (to both)
+EVT INVITE_CANCELLED <leader> <target>
+EVT START <leader> <p0> <p1> 0|1|spectator <first player>
 EVT MOVE <leader> <player> <house>
 EVT END <leader> <winner|draw> <cap0> <cap1> normal|forfeit|left|disconnect <game_id>
 EVT CHAT <from> <text>
@@ -103,7 +116,9 @@ The client rebuilds a `Board` from this line and renders it with `render_board()
 | `UNKNOWN_USER` | no such user, or not online |
 | `NOT_YOUR_TURN`, `INVALID_HOUSE`, `EMPTY_HOUSE`, `MUST_FEED` | illegal move (from `PlayResult`) |
 | `NO_GAME` | `/replay` of an unknown game |
-| `FRIENDS_FULL`, `SERVER_FULL` | a limit was reached |
+| `BUSY` | `/invite` of a user already in a lobby or with a pending invitation |
+| `NO_INVITE` | `/accept` or `/deny` without a (matching) pending invitation |
+| `SERVER_FULL` | a limit was reached |
 | `LINE_TOO_LONG` | line over 1023 bytes, connection closed |
 
 ## Example
@@ -116,8 +131,8 @@ A> /create                   A< OK create alice public
 B> /join alice               B< OK join alice player
                              A< EVT JOINED alice bob player
 A> /start                    A< OK start
-                             A< EVT START alice alice bob 0
-                             B< EVT START alice alice bob 1
+                             A< EVT START alice alice bob 0 bob
+                             B< EVT START alice alice bob 1 bob
                              A,B< BOARD alice 1 0 4 4 4 4 4 4 4 4 4 4 4 4 0 0
 B> /move 3                   B< OK move 3
                              A,B< EVT MOVE alice bob 3
@@ -128,6 +143,7 @@ A> /forfeit                  A< OK forfeit
 ```
 
 ## Persistence (server side, `data/`)
-- `users.txt`: one user per line: `name wins losses draws friend1,friend2|- bio…`
+- `users.txt`: one user per line: `name wins losses draws bio…`
+- `friends.txt`: the friend graph, one directed edge per line: `from to`
 - `games/<id>.txt`: first player and the list of moves (`save_game` format)
 - `games/index.txt`: one game per line: `id p0 p1 winner cap0 cap1 moves`

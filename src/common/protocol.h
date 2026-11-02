@@ -10,8 +10,7 @@
 #define MAX_CLIENTS       100
 #define MAX_LOBBIES       MAX_CLIENTS
 #define MAX_LOBBY_MEMBERS 16   /* the two players + spectators */
-#define MAX_INVITES       16
-#define MAX_FRIENDS       32
+#define INVITE_TIMEOUT    30   /* seconds before a pending invitation expires */
 #define MAX_USERS         1024
 
 #endif

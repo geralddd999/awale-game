@@ -2,6 +2,7 @@
 #include "session.h"
 #include "lobby.h"
 #include "history.h"
+#include "friends.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,6 +135,16 @@ static void cmd_invite(int slot, char *args){
 	if (e) err(slot, e);
 }
 
+static void cmd_accept(int slot, char *args){
+	const char *e = lobby_accept(slot, next_word(&args));
+	if (e) err(slot, e);
+}
+
+static void cmd_deny(int slot, char *args){
+	const char *e = lobby_deny(slot, next_word(&args));
+	if (e) err(slot, e);
+}
+
 static void cmd_kick(int slot, char *args){
 	const char *e = lobby_kick(clients[slot].lobby, slot, next_word(&args));
 	if (e) err(slot, e);
@@ -199,31 +210,36 @@ static void cmd_bio(int slot, char *args){
 	session_send(slot, "OK bio %s %s", u->name, u->bio);
 }
 
+/* /friend alone lists the out-edges of your vertex in the friend graph */
+static void list_friends(int slot){
+	static int ids[MAX_USERS];
+	int n = friends_of(clients[slot].user->id, ids, MAX_USERS);
+
+	session_send(slot, "OK friends %d", n);
+	for (int i = 0; i<n; i++){
+		const char *name = users_by_id(ids[i])->name;
+		session_send(slot, "FRIEND %s %s", name, session_find(name) >= 0 ? "online" : "offline");
+	}
+}
+
 static void cmd_friend(int slot, char *args){
 	char *name = next_word(&args);
 	User *me = clients[slot].user;
+	if (*name == '\0') { list_friends(slot); return; }
 
-	if (*name == '\0'){
-		char list[MAX_FRIENDS*(NAME_LEN+1)+1] = "";
-		for (int i = 0; i<me->nfriends; i++){
-			if (i) strcat(list, ",");
-			strcat(list, me->friends[i]);
-		}
-		session_send(slot, "OK friends %s", me->nfriends ? list : "-");
-		return;
-	}
-
-	if (users_get(name, 0) == NULL) { err(slot, "UNKNOWN_USER no such user"); return; }
-	if (strcmp(name, me->name) == 0) { err(slot, "BAD_ARGS you cannot befriend yourself"); return; }
-	if (users_add_friend(me, name) < 0) { err(slot, "FRIENDS_FULL too many friends"); return; }
-	users_save();
+	User *other = users_get(name, 0);
+	if (other == NULL) { err(slot, "UNKNOWN_USER no such user"); return; }
+	if (other == me) { err(slot, "BAD_ARGS you cannot befriend yourself"); return; }
+	if (friends_add(me->id, other->id) < 0) { err(slot, "BAD_ARGS already your friend"); return; }
+	friends_save();
 	session_send(slot, "OK friend %s", name);
 }
 
 static void cmd_unfriend(int slot, char *args){
 	char *name = next_word(&args);
-	if (users_remove_friend(clients[slot].user, name) < 0) { err(slot, "UNKNOWN_USER not in your friends"); return; }
-	users_save();
+	User *other = users_get(name, 0);
+	if (other == NULL || friends_remove(clients[slot].user->id, other->id) < 0) { err(slot, "UNKNOWN_USER not in your friends"); return; }
+	friends_save();
 	session_send(slot, "OK unfriend %s", name);
 }
 
@@ -291,6 +307,8 @@ static const Command commands[] = {
 	{ "/join",     S_IDLE,   cmd_join },
 	{ "/leave",    S_LOBBY,  cmd_leave },
 	{ "/invite",   S_LOBBY,  cmd_invite },
+	{ "/accept",   S_IDLE,   cmd_accept },
+	{ "/deny",     S_IDLE,   cmd_deny },
 	{ "/kick",     S_LOBBY,  cmd_kick },
 	{ "/start",    S_LOBBY,  cmd_start },
 	{ "/move",     S_LOBBY,  cmd_move },

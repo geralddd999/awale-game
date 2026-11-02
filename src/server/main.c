@@ -11,6 +11,7 @@
 #include "commands.h"
 #include "lobby.h"
 #include "history.h"
+#include "friends.h"
 
 #define DATA_DIR  "data"
 #define GAMES_DIR DATA_DIR "/games"
@@ -99,6 +100,7 @@ static void reap_dead(void){
 static void app(int port){
 	SOCKET listener = init_connection(port);
 	fd_set rdfs;
+	struct timeval tv;
 	printf("Awale server listening on port %d\n", port);
 
 	while (1){
@@ -111,7 +113,12 @@ static void app(int port){
 			if (clients[i].sock > max) max = clients[i].sock;
 		}
 
-		if (select(max + 1, &rdfs, NULL, NULL, NULL) == -1){
+		/* wake up on our own when the next invitation expires, otherwise wait for the sockets only */
+		int wait = lobby_next_expiry(time(NULL));
+		tv.tv_sec = wait;
+		tv.tv_usec = 0;
+
+		if (select(max + 1, &rdfs, NULL, NULL, wait >= 0 ? &tv : NULL) == -1){
 			if (errno == EINTR) continue;
 			perror("select()");
 			exit(errno);
@@ -123,12 +130,15 @@ static void app(int port){
 			if (clients[i].state != ST_FREE && !clients[i].dead && FD_ISSET(clients[i].sock, &rdfs))
 				read_client(i);
 		}
+		lobby_expire_invites(time(NULL));
 		reap_dead();
 	}
 }
 
 int main(int argc, char **argv){
 	int port = (argc > 1) ? atoi(argv[1]) : PORT;
+	/* optional invitation delay in seconds, mostly to keep the tests short */
+	if (argc > 2) lobby_set_invite_timeout(atoi(argv[2]));
 
 	/* a write to a closed connection must not kill the server */
 	signal(SIGPIPE, SIG_IGN);
@@ -137,6 +147,7 @@ int main(int argc, char **argv){
 	mkdir(DATA_DIR, 0755);
 	mkdir(GAMES_DIR, 0755);
 	users_load(DATA_DIR "/users.txt");
+	friends_load(DATA_DIR "/friends.txt");
 	history_init(GAMES_DIR);
 	session_init();
 	lobby_init();

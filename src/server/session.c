@@ -7,6 +7,7 @@ void session_init(void){
 	for (int i = 0; i<MAX_CLIENTS; i++){
 		clients[i].state = ST_FREE;
 		clients[i].lobby = -1;
+		clients[i].invite_lobby = -1;
 	}
 }
 
@@ -18,6 +19,7 @@ int session_alloc(SOCKET sock){
 		clients[i].sock = sock;
 		clients[i].state = ST_UNAUTH;
 		clients[i].lobby = -1;
+		clients[i].invite_lobby = -1;
 		linebuf_init(&clients[i].in);
 		return i;
 	}
@@ -29,6 +31,7 @@ void session_free(int slot){
 	clients[slot].state = ST_FREE;
 	clients[slot].dead = 0;
 	clients[slot].lobby = -1;
+	clients[slot].invite_lobby = -1;
 	clients[slot].user = NULL;
 }
 

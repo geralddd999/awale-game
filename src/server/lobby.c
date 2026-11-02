@@ -1,11 +1,17 @@
 #include "lobby.h"
 #include "session.h"
 #include "history.h"
+#include "friends.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static Lobby lobbies[MAX_LOBBIES];
+static int invite_timeout = INVITE_TIMEOUT;
+
+void lobby_set_invite_timeout(int seconds){
+	if (seconds > 0) invite_timeout = seconds;
+}
 
 void lobby_init(void){
 	for (int i = 0; i<MAX_LOBBIES; i++) lobbies[i].status = LOBBY_FREE;
@@ -64,8 +70,9 @@ static void send_start(int id, int to){
 	if (side < 0) snprintf(role, sizeof role, "spectator");
 	else snprintf(role, sizeof role, "%d", side);
 
-	session_send(to, "EVT START %s %s %s %s", lobby_name(id),
-	             clients[l->seat[0]].name, clients[l->seat[1]].name, role);
+	session_send(to, "EVT START %s %s %s %s %s", lobby_name(id),
+	             clients[l->seat[0]].name, clients[l->seat[1]].name, role,
+	             clients[l->seat[l->game.first_player]].name);
 }
 
 void lobby_list(int slot){
@@ -84,18 +91,35 @@ void lobby_list(int slot){
 	}
 }
 
-static int find_invite(const Lobby *l, const char *name){
-	for (int i = 0; i<l->ninvited; i++){
-		if (strcmp(l->invited[i], name) == 0) return i;
-	}
-	return -1;
+/*
+ * Ends the pending invitation of `target`, if any. With an event, the leader is told
+ * "EVT <event> <leader> <target>", and so is the target when notify_target is set.
+ */
+static void invite_end(int target, const char *event, int notify_target){
+	int id = clients[target].invite_lobby;
+	if (id < 0) return;
+	clients[target].invite_lobby = -1;
+	if (event == NULL) return;
+
+	if (notify_target) session_send(target, "EVT %s %s %s", event, lobby_name(id), clients[target].name);
+	session_send(lobbies[id].leader, "EVT %s %s %s", event, lobby_name(id), clients[target].name);
 }
 
-static void remove_invite(Lobby *l, const char *name){
-	int i = find_invite(l, name);
-	if (i < 0) return;
-	memmove(l->invited[i], l->invited[i+1], (l->ninvited-i-1) * sizeof l->invited[0]);
-	l->ninvited--;
+void lobby_expire_invites(time_t now){
+	for (int i = 0; i<MAX_CLIENTS; i++){
+		if (clients[i].state != ST_FREE && clients[i].invite_lobby >= 0 && now >= clients[i].invite_expires)
+			invite_end(i, "INVITE_EXPIRED", 1);
+	}
+}
+
+int lobby_next_expiry(time_t now){
+	int next = -1;
+	for (int i = 0; i<MAX_CLIENTS; i++){
+		if (clients[i].state == ST_FREE || clients[i].invite_lobby < 0) continue;
+		int left = clients[i].invite_expires > now ? (int)(clients[i].invite_expires - now) : 0;
+		if (next < 0 || left < next) next = left;
+	}
+	return next;
 }
 
 /* removes a member from the lobby and sends it back to the hall */
@@ -154,13 +178,17 @@ static void end_game(int id, const char *reason){
 	                b->captured[0], b->captured[1], reason, game_id);
 
 	l->status = LOBBY_WAITING;
-	l->next_first = opponent(l->game.first_player);
 }
 
 static void close_lobby(int id, const char *reason){
 	Lobby *l = &lobbies[id];
 	char name[NAME_LEN+1];
 	snprintf(name, sizeof name, "%s", lobby_name(id));
+
+	/* invitations to a closed lobby cannot be accepted any more */
+	for (int i = 0; i<MAX_CLIENTS; i++){
+		if (clients[i].state != ST_FREE && clients[i].invite_lobby == id) invite_end(i, "INVITE_CANCELLED", 1);
+	}
 
 	/* tell the hall first, the members are not in it yet */
 	session_broadcast_hall(-1, "EVT LOBBY_CLOSED %s %s", name, reason);
@@ -189,8 +217,8 @@ const char *lobby_create(int slot, int is_private){
 	l->members[0] = slot;
 	l->nmembers = 1;
 	l->is_private = is_private;
-	l->next_first = (Side)(rand()%2);
 
+	invite_end(slot, "INVITE_CANCELLED", 1);
 	clients[slot].state = ST_IN_LOBBY;
 	clients[slot].lobby = id;
 
@@ -200,15 +228,17 @@ const char *lobby_create(int slot, int is_private){
 	return NULL;
 }
 
-const char *lobby_join(int id, int slot){
+/* `invited` lets the client into a private lobby */
+static const char *enter(int id, int slot, int invited){
 	Lobby *l = &lobbies[id];
 	const char *name = clients[slot].name;
 
-	if (l->is_private && find_invite(l, name) < 0 && !users_is_friend(clients[l->leader].user, name))
+	if (!invited && l->is_private && !friends_has(clients[l->leader].user->id, clients[slot].user->id))
 		return "PRIVATE_LOBBY this lobby is private, ask the leader for an invite";
 	if (l->nmembers == MAX_LOBBY_MEMBERS) return "LOBBY_FULL this lobby is full";
 
-	remove_invite(l, name);
+	/* entering the inviting lobby answers the invitation, entering another one cancels it */
+	invite_end(slot, clients[slot].invite_lobby == id ? NULL : "INVITE_CANCELLED", 1);
 	l->members[l->nmembers++] = slot;
 	clients[slot].state = ST_IN_LOBBY;
 	clients[slot].lobby = id;
@@ -230,21 +260,47 @@ const char *lobby_join(int id, int slot){
 	return NULL;
 }
 
+const char *lobby_join(int id, int slot){
+	return enter(id, slot, 0);
+}
+
 const char *lobby_invite(int id, int by, int target){
 	Lobby *l = &lobbies[id];
-	const char *name = clients[target].name;
+	Client *c = &clients[target];
 
 	if (by != l->leader) return "NOT_LEADER only the leader can invite";
-	if (clients[target].lobby == id) return "BAD_ARGS already in this lobby";
+	if (c->state == ST_IN_LOBBY) return "BUSY this user is already in a lobby";
+	/* one invitation at a time: the user must answer it, or let it expire, before getting another */
+	if (c->invite_lobby >= 0) return "BUSY this user already has a pending invitation";
 
-	if (find_invite(l, name) < 0){
-		/* forget the oldest invitation when the list is full */
-		if (l->ninvited == MAX_INVITES) remove_invite(l, l->invited[0]);
-		snprintf(l->invited[l->ninvited++], NAME_LEN+1, "%s", name);
-	}
+	c->invite_lobby = id;
+	c->invite_expires = time(NULL) + invite_timeout;
+	session_send(target, "EVT INVITE %s %d", lobby_name(id), invite_timeout);
+	session_send(by, "OK invite %s", c->name);
+	return NULL;
+}
 
-	session_send(target, "EVT INVITE %s", lobby_name(id));
-	session_send(by, "OK invite %s", name);
+/* the pending invitation of `slot`, checked against the leader name the user typed (may be empty) */
+static const char *pending_invite(int slot, const char *leader, int *id){
+	*id = clients[slot].invite_lobby;
+	if (*id < 0) return "NO_INVITE you have no pending invitation";
+	if (*leader != '\0' && strcmp(leader, lobby_name(*id)) != 0) return "NO_INVITE you have no invitation from this lobby";
+	return NULL;
+}
+
+const char *lobby_accept(int slot, const char *leader){
+	int id;
+	const char *e = pending_invite(slot, leader, &id);
+	return e ? e : enter(id, slot, 1);
+}
+
+const char *lobby_deny(int slot, const char *leader){
+	int id;
+	const char *e = pending_invite(slot, leader, &id);
+	if (e) return e;
+
+	session_send(slot, "OK deny %s", lobby_name(id));
+	invite_end(slot, "INVITE_DENIED", 0);
 	return NULL;
 }
 
@@ -260,7 +316,6 @@ const char *lobby_kick(int id, int by, const char *name){
 
 	session_send(target, "EVT KICKED %s", lobby_name(id));
 	detach(id, target);
-	remove_invite(l, name);
 	session_send(by, "OK kick %s", name);
 	lobby_broadcast(id, by, "EVT LEFT %s %s kicked", lobby_name(id), name);
 	fill_seat(id);
@@ -274,7 +329,8 @@ const char *lobby_start(int id, int by){
 	if (l->status == LOBBY_PLAYING) return "BAD_STATE a game is already running";
 	if (l->seat[1] < 0) return "SEATS_EMPTY waiting for an opponent to join";
 
-	init_game(&l->game, l->next_first);
+	/* the server draws who begins each game */
+	init_game(&l->game, (Side)(rand()%2));
 	l->status = LOBBY_PLAYING;
 
 	session_send(by, "OK start");
@@ -320,6 +376,9 @@ const char *lobby_forfeit(int id, int slot){
 }
 
 void lobby_leave(int slot, const char *reason){
+	/* a user who disconnects with a pending invitation never answers it */
+	invite_end(slot, "INVITE_CANCELLED", 0);
+
 	int id = clients[slot].lobby;
 	if (id < 0) return;
 

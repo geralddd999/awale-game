@@ -55,10 +55,11 @@ void display_line(const char *line){
 		const char *text = strchr(line+4, ' ');
 		printf("! %s\n", text ? text+1 : line+4);
 	}
-	else if (sscanf(line, "EVT START %63s %16s %16s %63s", a, players[0], players[1], b) == 4){
+	else if (sscanf(line, "EVT START %63s %16s %16s %63s %63s", a, players[0], players[1], b, c) == 5){
 		my_side = (strcmp(b, "spectator") == 0) ? -1 : b[0]-'0';
 		playing = 1;
 		printf("== game starts in %s's lobby: %s vs %s%s\n", a, players[0], players[1], my_side < 0 ? " (spectating)" : "");
+		printf("== the server drew %s to begin\n", strcmp(c, me) == 0 ? "you" : c);
 	}
 	else if (sscanf(line, "EVT END %63s %63s %63s %63s %n", a, b, c, d, &n) == 4){
 		playing = 0;
@@ -73,7 +74,14 @@ void display_line(const char *line){
 	}
 	else if (sscanf(line, "EVT CHAT %63s %n", a, &n) == 1) printf("[%s] %s\n", a, line+n);
 	else if (sscanf(line, "EVT PM %63s %n", a, &n) == 1) printf("(private) %s: %s\n", a, line+n);
-	else if (sscanf(line, "EVT INVITE %63s", a) == 1) printf("== %s invites you to their lobby, type /join %s\n", a, a);
+	/* must come before "EVT INVITE %s", which would also match these lines */
+	else if (sscanf(line, "EVT INVITE_%15s %63s %63s", a, b, c) == 3){
+		const char *what = strcmp(a, "DENIED") == 0 ? "was denied" : strcmp(a, "EXPIRED") == 0 ? "expired" : "was cancelled";
+		if (strcmp(c, me) == 0) printf("== the invitation to %s's lobby %s\n", b, what);
+		else printf("== your invitation to %s %s\n", c, what);
+	}
+	else if (sscanf(line, "EVT INVITE %63s %63s", a, b) == 2)
+		printf("== %s invites you to their lobby: /accept or /deny (expires in %ss)\n", a, b);
 	else if (sscanf(line, "EVT MOVE %63s %63s %63s", a, b, c) == 3) printf("== %s played house %s\n", b, c);
 	else if (starts_with(line, "OK say") || starts_with(line, "OK msg") || starts_with(line, "OK move")) return;
 	else if (starts_with(line, "OK ")) printf("ok: %s\n", line+3);

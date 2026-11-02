@@ -1,6 +1,7 @@
 #ifndef SESSION_H
 #define SESSION_H
 
+#include <time.h>
 #include "net.h"
 #include "protocol.h"
 #include "users.h"
@@ -21,6 +22,9 @@ typedef struct {
 	char name[NAME_LEN+1];
 	int lobby;    /* index in the lobby table, -1 when not in a lobby */
 	User *user;   /* persistent profile, NULL before /login */
+	/* at most one pending invitation: the inviting lobby (-1 if none) and when it expires */
+	int invite_lobby;
+	time_t invite_expires;
 } Client;
 
 /*
