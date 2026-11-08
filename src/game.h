@@ -8,46 +8,40 @@
 #define MAX_IDLE_MOVES 100
 #define MAX_MOVES 2600
 
-typedef enum {
-	PLAYER_0 = 0,   
-	PLAYER_1 = 1    
-} Side;
+typedef enum { PLAYER_0 = 0, PLAYER_1 = 1 } Side;
+
+typedef enum { GAME_ONGOING, GAME_FINISHED } GameStatus;
 
 typedef enum {
-	GAME_ONGOING,
-	GAME_FINISHED
-} GameStatus;
-
-typedef enum {
-	WINNER_NONE,
-	WINNER_PLAYER_0,
-	WINNER_PLAYER_1,
-	WINNER_DRAW
+  WINNER_NONE,
+  WINNER_PLAYER_0,
+  WINNER_PLAYER_1,
+  WINNER_DRAW
 } Winner;
 
 typedef enum {
-	PLAY_OK,
-	PLAY_GAME_OVER,
-	PLAY_NOT_YOUR_TURN,
-	PLAY_INVALID_HOUSE,   
-	PLAY_EMPTY_HOUSE,
-	PLAY_MUST_FEED        
+  PLAY_OK,
+  PLAY_GAME_OVER,
+  PLAY_NOT_YOUR_TURN,
+  PLAY_INVALID_HOUSE,
+  PLAY_EMPTY_HOUSE,
+  PLAY_MUST_FEED
 } PlayResult;
 
 typedef struct {
-	int houses[NUM_HOUSES];
-	int captured[2];   
-	int idle_moves;
-	Side turn;
-	GameStatus status;
-	Winner winner;
+  int houses[NUM_HOUSES];
+  int captured[2];
+  int idle_moves;
+  Side turn;
+  GameStatus status;
+  Winner winner;
 } Board;
 
 typedef struct {
-	Board board;
-	Side first_player;
-	unsigned char moves[MAX_MOVES];
-	int num_moves;
+  Board board;
+  Side first_player;
+  unsigned char moves[MAX_MOVES];
+  int num_moves;
 } Game;
 
 int abs_index(Side side, int house);

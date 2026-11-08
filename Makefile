@@ -8,7 +8,7 @@ SERVER_SRC = $(wildcard src/server/*.c)
 CLIENT_SRC = $(wildcard src/client/*.c)
 HEADERS    = $(wildcard src/*.h src/common/*.h src/server/*.h src/client/*.h)
 
-.PHONY: all test e2e play clean
+.PHONY: all test e2e play clean format
 
 all: $(BUILD)/server $(BUILD)/client
 
@@ -42,3 +42,6 @@ $(BUILD):
 
 clean:
 	rm -rf $(BUILD)
+
+format:
+	find src tests -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i

@@ -50,6 +50,7 @@ expect $A "EVT USER_JOIN bob"
 send $C "/login carol";      expect $C "OK login carol"
 send $D "/login alice";      expect $D "ERR NAME_TAKEN *"
 send $D "/login bad name!";  expect $D "ERR BAD_NAME *"
+send $D "/login draw";       expect $D "ERR BAD_NAME *"
 
 # --- two commands in a single packet are both handled
 printf '/list\n/lobbies\n' >&"$A"
@@ -83,6 +84,8 @@ send $O "/move 1";           expect $O "ERR NOT_YOUR_TURN *"
 send $C "/move 1";           expect $C "ERR NOT_PLAYER *"
 send $P "/move 7";           expect $P "ERR INVALID_HOUSE *"
 send $P "/move x";           expect $P "ERR BAD_ARGS *"
+send $P "/move 4294967297";  expect $P "ERR BAD_ARGS *"   
+send $P "/move -2147483648"; expect $P "ERR INVALID_HOUSE *"
 send $P "/move 1";           expect $P "OK move 1"
 expect $C "EVT MOVE alice $PNAME 1"
 expect $C "BOARD alice *"
@@ -169,9 +172,22 @@ expect $D "EVT INVITE carol 2"
 send $C "/leave";            expect $C "OK leave"
 expect $D "EVT INVITE_CANCELLED carol dave"
 
+
 # --- profiles
 send $A "/bio set I like seeds"; expect $A "OK bio"
-send $C "/bio alice";        expect $C "OK bio alice I like seeds"
+send $C "/bio alice";        expect $C "OK bio alice 1"; expect $C "BIO I like seeds"
+send $A '/bio set Hi\n\nI am alice\nfrom Lyon'; expect $A "OK bio"
+send $C "/bio alice";        expect $C "OK bio alice 4"; expect $C "BIO Hi"; expect $C "BIO "; expect $C "BIO I am alice"; expect $C "BIO from Lyon"
+send $A '/bio set l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10'; expect $A "OK bio"
+send $A '/bio set l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11'; expect $A "ERR BAD_ARGS *too many lines*"
+send $A "/bio set $(printf 'x%.0s' $(seq 81))"; expect $A "ERR BAD_ARGS *too long*"
+send $A "/bio set $(printf 'x%.0s' $(seq 80))"; expect $A "OK bio"
+send $A "/bio set caf$(printf '\303\251')"; expect $A "ERR BAD_ARGS *ASCII*"
+send $A "/bio set $(printf 'a\033[31mb')"; expect $A "ERR BAD_ARGS *ASCII*"
+send $A "/bio set";          expect $A "OK bio"
+send $C "/bio alice";        expect $C "OK bio alice 0"
+send $A "/bio set I like seeds"; expect $A "OK bio"
+
 
 # --- a line without newline that fills the buffer gets the client dropped
 head -c 2000 /dev/zero | tr '\0' 'x' >&"$D"

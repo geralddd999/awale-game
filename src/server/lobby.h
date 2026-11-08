@@ -1,34 +1,35 @@
 #ifndef LOBBY_H
 #define LOBBY_H
 
-#include <stddef.h>
-#include <time.h>
 #include "game.h"
 #include "protocol.h"
+#include <stddef.h>
+#include <time.h>
 
 typedef enum {
-	LOBBY_FREE,
-	LOBBY_WAITING,   /* open, no game running */
-	LOBBY_PLAYING
+  LOBBY_FREE,
+  LOBBY_WAITING, /* open, no game running */
+  LOBBY_PLAYING
 } LobbyStatus;
 
 /*
- * A lobby is named after its leader. The leader always holds seat 0 (PLAYER_0 in the game),
- * seat 1 is the opponent, every other member is a spectator. All values are client slots.
+ * A lobby is named after its leader. The leader always holds seat 0 (PLAYER_0
+ * in the game), seat 1 is the opponent, every other member is a spectator. All
+ * values are client slots.
  */
 typedef struct {
-	LobbyStatus status;
-	int leader;
-	int seat[2];
-	int members[MAX_LOBBY_MEMBERS];
-	int nmembers;
-	int is_private;
-	Game game;
+  LobbyStatus status;
+  int leader;
+  int seat[2];
+  int members[MAX_LOBBY_MEMBERS];
+  int nmembers;
+  int is_private;
+  Game game;
 } Lobby;
 
 /*
- * The functions returning a const char * return NULL on success, or "CODE text" for an ERR reply.
- * They send the events to the members themselves.
+ * The functions returning a const char * return NULL on success, or "CODE text"
+ * for an ERR reply. They send the events to the members themselves.
  */
 void lobby_init(void);
 int lobby_find(const char *leader);
@@ -38,7 +39,8 @@ void lobby_list(int slot);
 const char *lobby_create(int slot, int is_private);
 const char *lobby_join(int id, int slot);
 const char *lobby_invite(int id, int by, int target);
-/* answer the pending invitation; `leader` may be empty or must name the inviting lobby */
+/* answer the pending invitation; `leader` may be empty or must name the
+ * inviting lobby */
 const char *lobby_accept(int slot, const char *leader);
 const char *lobby_deny(int slot, const char *leader);
 const char *lobby_kick(int id, int by, const char *target);

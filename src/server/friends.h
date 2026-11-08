@@ -2,10 +2,10 @@
 #define FRIENDS_H
 
 /*
- * Friendships as a directed graph: users are the vertices (User.id), an edge a -> b means
- * "a added b as a friend". It is directed so that friending someone does not give you access
- * to their private lobbies; a mutual friendship is two edges.
- * Stored in data/friends.txt as one edge per line: "a b".
+ * Friendships as a directed graph: users are the vertices (User.id), an edge a
+ * -> b means "a added b as a friend". It is directed so that friending someone
+ * does not give you access to their private lobbies; a mutual friendship is two
+ * edges. Stored in data/friends.txt as one edge per line: "a b".
  */
 
 void friends_load(const char *path);

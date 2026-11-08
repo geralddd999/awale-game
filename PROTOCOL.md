@@ -5,8 +5,8 @@ Text protocol over TCP (default port 1977).
 ## Framing
 - One message = one line terminated by `\n` (a `\r` before it is ignored).
 - Lines are at most 1023 bytes. A client that sends a longer line receives `ERR LINE_TOO_LONG` and is disconnected.
-- Fields are separated by spaces. Free text (chat, bio) is always the last field and may contain spaces.
-- Usernames: `[A-Za-z0-9_]{1,16}`. A username can be connected only once at a time.
+- A bio has up to 10 lines of up to 80 printable ASCII characters. On the wire it is a single line: its lines are separated by the two characters `\n` (backslash, then `n`). The client's `/bio set` editor builds that line for the user.
+- Usernames: `[A-Za-z0-9_]{1,16}`, except `draw`, which is reserved: it stands for a drawn game in the winner field of `EVT END` and `GAME`. A username can be connected only once at a time.
 
 Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands are followed by one line per item, and the count in the `OK` line says how many. `EVT` and `BOARD` lines can arrive at any time.
 
@@ -55,8 +55,8 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 | `/forfeit` | IN_LOBBY, seated | `OK forfeit` |
 | `/say <text>` | logged | `OK say` |
 | `/msg <name> <text>` | logged | `OK msg <name>` |
-| `/bio set <text>` | logged | `OK bio` |
-| `/bio [name]` | logged | `OK bio <name> <text>` |
+| `/bio set <text>` | logged | `OK bio`, or `ERR BAD_ARGS` if the bio has more than 10 lines, a line longer than 80 characters, or a non-printable or non-ASCII character. An empty text clears the bio |
+| `/bio [name]` | logged | `OK bio <name> <n>` + n × `BIO <line>` (`n` is 0 for an empty bio). Your own bio if no name is given |
 | `/friend [name]` | logged | `OK friend <name>`, or with no name `OK friends <n>` + n × `FRIEND <name> online\|offline` |
 | `/unfriend <name>` | logged | `OK unfriend <name>` |
 | `/history [name]` | logged | `OK history <n>` + n × `GAME <id> <p0> <p1> <winner\|draw> <cap0> <cap1> <moves>` |
@@ -104,7 +104,7 @@ The client rebuilds a `Board` from this line and renders it with `render_board()
 | Code | Meaning |
 |---|---|
 | `NOT_LOGGED` | command sent before `/login` |
-| `BAD_NAME`, `NAME_TAKEN` | `/login` refused |
+| `BAD_NAME`, `NAME_TAKEN` | `/login` refused (invalid or reserved name, or already connected) |
 | `UNKNOWN_CMD`, `BAD_ARGS` | unknown command / wrong arguments |
 | `BAD_STATE` | command not allowed now (e.g. kicking a player mid-game) |
 | `NO_LOBBY` | lobby does not exist / you are not in one |
