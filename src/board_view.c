@@ -2,8 +2,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+// checks if the given buffer has available space and, if so, appends the
+// formatted text to it, ensuring that the buffer is not overflowed
 static void append(char *buf, size_t size, size_t *len, const char *fmt, ...) {
   va_list args;
+
   if (*len >= size)
     return;
 
