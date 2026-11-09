@@ -328,16 +328,27 @@ static void cmd_bio(int slot, char *args) {
   send_bio(slot, u);
 }
 
-/* /friend alone lists the out-edges of your vertex in the friend graph */
+/* /friend alone lists mutual friends and pending friend requests */
 static void list_friends(int slot) {
-  static int ids[MAX_USERS];
-  int n = friends_of(clients[slot].user->id, ids, MAX_USERS);
+  static int ids[MAX_USERS], req_in[MAX_USERS], req_out[MAX_USERS];
+  int me_id = clients[slot].user->id;
+  int n_friends = friends_of(me_id, ids, MAX_USERS);
+  int n_in = friends_requests_in(me_id, req_in, MAX_USERS);
+  int n_out = friends_requests_out(me_id, req_out, MAX_USERS);
 
-  session_send(slot, "OK friends %d", n);
-  for (int i = 0; i < n; i++) {
+  session_send(slot, "OK friends %d", n_friends + n_in + n_out);
+  for (int i = 0; i < n_friends; i++) {
     const char *name = users_by_id(ids[i])->name;
     session_send(slot, "FRIEND %s %s", name,
                  session_find(name) >= 0 ? "online" : "offline");
+  }
+  for (int i = 0; i < n_in; i++) {
+    const char *name = users_by_id(req_in[i])->name;
+    session_send(slot, "FRIEND %s incoming", name);
+  }
+  for (int i = 0; i < n_out; i++) {
+    const char *name = users_by_id(req_out[i])->name;
+    session_send(slot, "FRIEND %s outgoing", name);
   }
 }
 
@@ -359,22 +370,44 @@ static void cmd_friend(int slot, char *args) {
     return;
   }
   if (friends_add(me->id, other->id) < 0) {
-    err(slot, "BAD_ARGS already your friend");
+    if (friends_has(other->id, me->id))
+      err(slot, "BAD_ARGS already your friend");
+    else
+      err(slot, "BAD_ARGS friend request already sent");
     return;
   }
   friends_save();
   session_send(slot, "OK friend %s", name);
+
+  int target = session_find(other->name);
+  if (target >= 0) {
+    if (friends_has(other->id, me->id))
+      session_send(target, "EVT FRIEND_ACCEPT %s", me->name);
+    else
+      session_send(target, "EVT FRIEND_REQ %s", me->name);
+  }
 }
 
 static void cmd_unfriend(int slot, char *args) {
   char *name = next_word(&args);
+  User *me = clients[slot].user;
   User *other = users_get(name, 0);
-  if (other == NULL || friends_remove(clients[slot].user->id, other->id) < 0) {
+  if (other == NULL) {
+    err(slot, "UNKNOWN_USER not in your friends");
+    return;
+  }
+  int r1 = friends_remove(me->id, other->id);
+  int r2 = friends_remove(other->id, me->id);
+  if (r1 < 0 && r2 < 0) {
     err(slot, "UNKNOWN_USER not in your friends");
     return;
   }
   friends_save();
   session_send(slot, "OK unfriend %s", name);
+
+  int target = session_find(other->name);
+  if (target >= 0)
+    session_send(target, "EVT UNFRIEND %s", me->name);
 }
 
 static void cmd_history(int slot, char *args) {

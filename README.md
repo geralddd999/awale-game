@@ -95,12 +95,12 @@ A user has at most one pending invitation. It expires after 30 s (`invite_sec` o
 
 | Command | Description |
 |---|---|
-| `/friend <user>` | add a friend |
-| `/friend` | list your friends and whether they are online |
-| `/unfriend <user>` | remove a friend |
+| `/friend <user>` | send a friend request (or accept a pending request from `<user>`) |
+| `/friend` | list your mutual friends (`online`/`offline`) and pending requests (`incoming`/`outgoing`) |
+| `/unfriend <user>` | remove a friend or cancel/decline a pending friend request |
 
-A lobby created with `/create private` can only be joined by the leader's friends, or by users the leader invited.
-Friendship is one-way: `/friend bob` lets Bob into **your** private lobbies, not you into his.
+A lobby created with `/create private` can only be joined by the leader's mutual friends, or by users the leader invited.
+Friendship is mutual: `/friend bob` sends a friend request to Bob, and once Bob runs `/friend alice`, both are friends and can join each other's private lobbies.
 
 ### History and ranking
 
@@ -147,7 +147,7 @@ All in `data/`, plain text:
 | File | Content |
 |---|---|
 | `users.txt` | one user per line: name, wins, losses, draws, bio |
-| `friends.txt` | the friend graph, one `from to` edge per line |
+| `friends.txt` | friendships (`from to`) and pending friend requests (`REQ from to`) |
 | `games/<id>.txt` | the moves of a finished game |
 | `games/index.txt` | one line per finished game: id, players, winner, score, number of moves |
 

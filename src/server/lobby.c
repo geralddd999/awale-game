@@ -265,7 +265,7 @@ static const char *enter(int id, int slot, int invited) {
   const char *name = clients[slot].name;
 
   if (!invited && l->is_private &&
-      !friends_has(clients[l->leader].user->id, clients[slot].user->id))
+      !friends_are_mutual(clients[l->leader].user->id, clients[slot].user->id))
     return "PRIVATE_LOBBY this lobby is private, ask the leader for an invite";
   if (l->nmembers == MAX_LOBBY_MEMBERS)
     return "LOBBY_FULL this lobby is full";

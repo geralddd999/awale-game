@@ -156,8 +156,12 @@ expect $A "EVT INVITE carol 2"
 send $A "/accept carol";     expect $A "OK join carol player"
 send $C "/invite alice";     expect $C "ERR BUSY *"
 send $C "/friend dave";      expect $C "OK friend dave"
-send $C "/friend";           expect $C "OK friends 1"
+expect $D "EVT FRIEND_REQ carol"
+send $D "/friend carol";     expect $D "OK friend carol"
+expect $C "EVT FRIEND_ACCEPT dave"
+send $C "/friend";           expect $C "OK friends 2"
 expect $C "FRIEND dave online"
+expect $C "FRIEND alice incoming"
 send $C "/friend dave";      expect $C "ERR BAD_ARGS *"
 send $C "/friend alice";     expect $C "OK friend alice"
 send $C "/unfriend alice";   expect $C "OK unfriend alice"
@@ -196,7 +200,7 @@ expect $D "ERR LINE_TOO_LONG *"
 # --- data survives a restart
 send $A "/quit";             expect $A "OK quit"
 grep -q "^alice 2 0 0 I like seeds$" "$TMP/data/users.txt" && passed=$((passed+1)) || { echo "FAILED: users.txt content"; cat "$TMP/data/users.txt"; failed=$((failed+1)); }
-[[ $(cat "$TMP/data/friends.txt") == $'alice carol\ncarol dave' ]] && passed=$((passed+1)) || { echo "FAILED: friends.txt content"; cat "$TMP/data/friends.txt"; failed=$((failed+1)); }
+[[ $(cat "$TMP/data/friends.txt") == $'carol dave\ndave carol' ]] && passed=$((passed+1)) || { echo "FAILED: friends.txt content"; cat "$TMP/data/friends.txt"; failed=$((failed+1)); }
 [[ -f $TMP/data/games/1.txt && -f $TMP/data/games/2.txt ]] && passed=$((passed+1)) || { echo "FAILED: saved games"; failed=$((failed+1)); }
 
 if [[ -n ${WRAP:-} ]]; then

@@ -93,8 +93,16 @@ void display_line(const char *line) {
         a, b);
   else if (sscanf(line, "EVT MOVE %63s %63s %63s", a, b, c) == 3)
     printf("== %s played house %s\n", b, c);
+  else if (sscanf(line, "EVT FRIEND_REQ %63s", a) == 1)
+    printf("== %s sent you a friend request (/friend %s to accept, /unfriend "
+           "%s to decline)\n",
+           a, a, a);
+  else if (sscanf(line, "EVT FRIEND_ACCEPT %63s", a) == 1)
+    printf("== %s accepted your friend request!\n", a);
+  else if (sscanf(line, "EVT UNFRIEND %63s", a) == 1)
+    printf("== %s removed you from their friends/requests\n", a);
   else if (sscanf(line, "OK bio %63s %d", a, &n) == 2)
-    printf("== bio of %s:\n", a);
+    printf("== bio of %s:%s\n", a, n == 0 ? " (empty)" : "");
   else if (starts_with(line, "BIO "))
     printf("   %s\n", line + 4);
   else if (starts_with(line, "OK say") || starts_with(line, "OK msg") ||
