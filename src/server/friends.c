@@ -57,6 +57,10 @@ int friends_has(int from, int to) {
   return 0;
 }
 
+int friends_are_mutual(int a, int b) {
+  return friends_has(a, b) && friends_has(b, a);
+}
+
 int friends_add(int from, int to) {
   /* walk to the end of the list (checking for a duplicate on the way) and
    * append there, so friends are listed in the order they were added */
@@ -89,9 +93,29 @@ int friends_remove(int from, int to) {
   return -1;
 }
 
-int friends_of(int from, int *ids, int max) {
+int friends_of(int user, int *ids, int max) {
   int n = 0;
-  for (Edge *e = out[from]; e != NULL && n < max; e = e->next)
-    ids[n++] = e->to;
+  for (Edge *e = out[user]; e != NULL && n < max; e = e->next) {
+    if (friends_has(e->to, user))
+      ids[n++] = e->to;
+  }
+  return n;
+}
+
+int friends_requests_in(int user, int *ids, int max) {
+  int n = 0;
+  for (int a = 0; a < users_count() && n < max; a++) {
+    if (a != user && friends_has(a, user) && !friends_has(user, a))
+      ids[n++] = a;
+  }
+  return n;
+}
+
+int friends_requests_out(int user, int *ids, int max) {
+  int n = 0;
+  for (Edge *e = out[user]; e != NULL && n < max; e = e->next) {
+    if (!friends_has(e->to, user))
+      ids[n++] = e->to;
+  }
   return n;
 }

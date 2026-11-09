@@ -34,7 +34,7 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 - The invited user answers with `/accept` or `/deny`. The invitation **expires after 30 seconds** without an answer (`EVT INVITE_EXPIRED`), and then the user can be invited again.
 - An invitation is also cancelled (`EVT INVITE_CANCELLED`) when the inviting lobby closes, when the invited user enters another lobby, or when they disconnect.
 - Accepting = joining the lobby, even if it is private. `/join <leader>` on the inviting lobby counts as accepting too.
-  Friendship is one-way: `/friend bob` lets bob into *your* private lobbies, not you into his.
+  Friendship is mutual: `/friend bob` sends a friend request to `bob`, and once `bob` also runs `/friend alice`, both are mutual friends and can enter each other's private lobbies.
 - `/say` talks to your current room: your lobby, or the hall if you are not in one.
 
 ## Client → server
@@ -57,8 +57,8 @@ Each request gets exactly one `OK` or `ERR` reply. `OK` replies to list commands
 | `/msg <name> <text>` | logged | `OK msg <name>` |
 | `/bio set <text>` | logged | `OK bio`, or `ERR BAD_ARGS` if the bio has more than 10 lines, a line longer than 80 characters, or a non-printable or non-ASCII character. An empty text clears the bio |
 | `/bio [name]` | logged | `OK bio <name> <n>` + n × `BIO <line>` (`n` is 0 for an empty bio). Your own bio if no name is given |
-| `/friend [name]` | logged | `OK friend <name>`, or with no name `OK friends <n>` + n × `FRIEND <name> online\|offline` |
-| `/unfriend <name>` | logged | `OK unfriend <name>` |
+| `/friend [name]` | logged | `OK friend <name>`, or with no name `OK friends <n>` + n × `FRIEND <name> online\|offline\|incoming\|outgoing` |
+| `/unfriend <name>` | logged | `OK unfriend <name>` (removes mutual friendship or cancels/declines a pending request) |
 | `/history [name]` | logged | `OK history <n>` + n × `GAME <id> <p0> <p1> <winner\|draw> <cap0> <cap1> <moves>` |
 | `/replay <id> [step]` | logged | `OK replay <id> <step> <total> <p0> <p1>` + `BOARD #<id> …` |
 | `/rank` | logged | `OK rank <n>` + n × `RANK <pos> <name> <wins> <losses> <draws>` |
@@ -86,6 +86,9 @@ EVT MOVE <leader> <player> <house>
 EVT END <leader> <winner|draw> <cap0> <cap1> normal|forfeit|left|disconnect <game_id>
 EVT CHAT <from> <text>
 EVT PM <from> <text>
+EVT FRIEND_REQ <from>
+EVT FRIEND_ACCEPT <from>
+EVT UNFRIEND <from>
 ```
 
 ## Board
@@ -144,6 +147,6 @@ A> /forfeit                  A< OK forfeit
 
 ## Persistence (server side, `data/`)
 - `users.txt`: one user per line: `name wins losses draws bio…`
-- `friends.txt`: the friend graph, one directed edge per line: `from to`
+- `friends.txt`: friendships (`from to`) and pending friend requests (`REQ from to`)
 - `games/<id>.txt`: first player and the list of moves (`save_game` format)
 - `games/index.txt`: one game per line: `id p0 p1 winner cap0 cap1 moves`

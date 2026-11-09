@@ -1,11 +1,18 @@
 #include <errno.h>
+#include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "display.h"
 #include "net.h"
+#include "net_client.h"
 #include "protocol.h"
+#include "ui.h"
+#include "ui_state.h"
 
 static SOCKET init_connection(const char *address, int port) {
   SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -32,6 +39,64 @@ static SOCKET init_connection(const char *address, int port) {
     exit(errno);
   }
   return sock;
+}
+
+static void app_tui(const char *address, int port, const char *name) {
+  SOCKET sock = init_connection(address, port);
+  LineBuf in;
+  char buffer[BUF_SIZE];
+  fd_set rdfs;
+
+  srand((unsigned int)time(NULL));
+  linebuf_init(&in);
+  ui_state_init(name, sock);
+  ui_init();
+
+  send_line(sock, "/login %s", name);
+  ui_render();
+
+  while (g_ui.running) {
+    FD_ZERO(&rdfs);
+    FD_SET(STDIN_FILENO, &rdfs);
+    FD_SET(sock, &rdfs);
+
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000; /* 100ms tick */
+
+    int ret = select(sock + 1, &rdfs, NULL, NULL, &tv);
+    if (ret == -1) {
+      if (errno == EINTR) {
+        g_ui.needs_redraw = 1;
+        ui_render();
+        continue;
+      }
+      break;
+    }
+
+    ui_tick();
+
+    if (FD_ISSET(STDIN_FILENO, &rdfs)) {
+      int ch;
+      while ((ch = wgetch(stdscr)) != ERR) {
+        ui_handle_key(ch);
+      }
+    }
+
+    if (FD_ISSET(sock, &rdfs)) {
+      if (linebuf_fill(&in, sock) == 0) {
+        break;
+      }
+      while (linebuf_next(&in, buffer, sizeof buffer)) {
+        net_client_handle_line(buffer);
+      }
+    }
+
+    ui_render();
+  }
+
+  ui_shutdown();
+  closesocket(sock);
 }
 
 static int bio_editing = 0;
@@ -80,7 +145,7 @@ static void send_input(SOCKET sock, const char *input) {
     send_line(sock, "/say %s", input);
 }
 
-static void app(const char *address, int port, const char *name) {
+static void app_cli(const char *address, int port, const char *name) {
   SOCKET sock = init_connection(address, port);
   LineBuf in;
   char buffer[BUF_SIZE];
@@ -104,8 +169,6 @@ static void app(const char *address, int port, const char *name) {
 
     if (stdin_open && FD_ISSET(STDIN_FILENO, &rdfs)) {
       if (fgets(buffer, sizeof buffer, stdin) == NULL) {
-        /* end of input (ctrl-D or piped file): leave politely, wait for the
-         * server to close */
         send_line(sock, "/quit");
         stdin_open = 0;
       } else {
@@ -133,6 +196,11 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  app(argv[1], (argc > 3) ? atoi(argv[3]) : PORT, argv[2]);
+  int port = (argc > 3) ? atoi(argv[3]) : PORT;
+  if (isatty(STDIN_FILENO))
+    app_tui(argv[1], port, argv[2]);
+  else
+    app_cli(argv[1], port, argv[2]);
+
   return EXIT_SUCCESS;
 }
