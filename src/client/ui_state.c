@@ -38,6 +38,7 @@ void ui_state_set_screen(ScreenId screen) {
   g_ui.side_idx = 0;
   g_ui.list_scroll = 0;
   g_ui.sub_action_idx = 0;
+  g_ui.modal_idx = 0;
   g_ui.modal = MODAL_NONE;
   if (g_ui.focus != FOCUS_CHAT)
     g_ui.focus = FOCUS_MAIN;
@@ -133,6 +134,22 @@ int ui_state_is_friend(const char *name) {
   for (int i = 0; i < g_ui.num_friends; i++) {
     if (strcmp(g_ui.friends[i].name, name) == 0)
       return 1;
+  }
+  return 0;
+}
+
+int ui_state_friend_status(const char *name) {
+  for (int i = 0; i < g_ui.num_friends; i++) {
+    if (strcmp(g_ui.friends[i].name, name) == 0)
+      return 1;
+  }
+  for (int i = 0; i < g_ui.num_friend_reqs_in; i++) {
+    if (strcmp(g_ui.friend_reqs_in[i], name) == 0)
+      return 2;
+  }
+  for (int i = 0; i < g_ui.num_friend_reqs_out; i++) {
+    if (strcmp(g_ui.friend_reqs_out[i], name) == 0)
+      return 3;
   }
   return 0;
 }

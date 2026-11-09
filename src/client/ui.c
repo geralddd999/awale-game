@@ -128,7 +128,12 @@ void ui_tick(void) {
   }
 }
 
-/* Draw persistent dashed Chat box */
+typedef struct {
+  int color;
+  char text[128];
+} WrappedChatLine;
+
+/* Draw persistent dashed Chat box with full line wrapping */
 static void render_chat_box(int y, int x, int h, int w) {
   int active = (g_ui.focus == FOCUS_CHAT);
   draw_box_style(stdscr, y, x, h, w, 1, active);
@@ -137,18 +142,28 @@ static void render_chat_box(int y, int x, int h, int w) {
   mvwprintw(stdscr, y, x + 2, " Chat %s", active ? "[Typing]" : "[Tab]");
   wattroff(stdscr, COLOR_PAIR(active ? CP_BORDER_ACTIVE : CP_TITLE) | A_BOLD);
 
-  int msg_rows = h - 4;
+  int inner_w = w - 2;
+  if (inner_w < 4)
+    return;
+
+  /* Calculate how many rows the input box needs (1 or 2 rows wrapped) */
+  int input_len = (int)strlen(g_ui.chat_input);
+  int first_cap = inner_w - 1; /* after '>' */
+  int input_rows = (active && input_len > first_cap) ? 2 : 1;
+
+  int msg_rows = h - 3 - input_rows;
   if (msg_rows < 1)
     return;
 
-  int start = g_ui.chat_count - msg_rows;
-  if (start < 0)
-    start = 0;
+  /* Wrap recent chat messages into visual lines of width `inner_w` */
+  static WrappedChatLine vlines[CHAT_MAX_LINES * 8];
+  int nvlines = 0;
+  int first_entry = g_ui.chat_count - msg_rows;
+  if (first_entry < 0)
+    first_entry = 0;
 
-  int inner_w = w - 2;
-  for (int i = 0; i < msg_rows && (start + i) < g_ui.chat_count; i++) {
-    ChatEntry *e = &g_ui.chat[start + i];
-    int row = y + 1 + i;
+  for (int i = first_entry; i < g_ui.chat_count; i++) {
+    ChatEntry *e = &g_ui.chat[i];
     char line_buf[CHAT_LINE_LEN + 32];
     if (e->kind == CHAT_PM)
       snprintf(line_buf, sizeof(line_buf), "(PM)%s: %s", e->sender, e->text);
@@ -167,33 +182,84 @@ static void render_chat_box(int y, int x, int h, int w) {
     else if (e->kind == CHAT_ERROR)
       color = CP_ERROR;
 
-    wattron(stdscr, COLOR_PAIR(color));
-    mvwprintw(stdscr, row, x + 1, "%-*.*s", inner_w, inner_w, line_buf);
-    wattroff(stdscr, COLOR_PAIR(color));
+    const char *p = line_buf;
+    int is_continuation = 0;
+    while (*p != '\0' && nvlines < (int)(sizeof(vlines) / sizeof(vlines[0]))) {
+      int avail = is_continuation ? (inner_w - 2) : inner_w;
+      if (avail < 1)
+        avail = 1;
+      int rem_len = (int)strlen(p);
+      int take = rem_len;
+
+      if (take > avail) {
+        take = avail;
+        /* Prefer breaking at a space if one exists in the second half of the
+         * line */
+        for (int k = avail; k > avail / 3; k--) {
+          if (p[k] == ' ') {
+            take = k;
+            break;
+          }
+        }
+      }
+
+      WrappedChatLine *vl = &vlines[nvlines++];
+      vl->color = color;
+      if (is_continuation) {
+        snprintf(vl->text, sizeof(vl->text), "  %.*s", take, p);
+      } else {
+        snprintf(vl->text, sizeof(vl->text), "%.*s", take, p);
+      }
+
+      p += take;
+      while (*p == ' ')
+        p++;
+      is_continuation = 1;
+    }
   }
 
-  mvwhline(stdscr, y + h - 3, x + 1, ACS_HLINE, inner_w);
-  int input_row = y + h - 2;
-  const char *disp = g_ui.chat_input;
-  int len = (int)strlen(disp);
-  int max_vis = inner_w - 2;
-  if (len > max_vis)
-    disp += (len - max_vis);
+  int start_v = nvlines - msg_rows;
+  if (start_v < 0)
+    start_v = 0;
 
+  for (int i = 0; i < msg_rows && (start_v + i) < nvlines; i++) {
+    WrappedChatLine *vl = &vlines[start_v + i];
+    wattron(stdscr, COLOR_PAIR(vl->color));
+    mvwprintw(stdscr, y + 1 + i, x + 1, "%-*.*s", inner_w, inner_w, vl->text);
+    wattroff(stdscr, COLOR_PAIR(vl->color));
+  }
+
+  int sep_row = y + h - 2 - input_rows;
+  mvwhline(stdscr, sep_row, x + 1, ACS_HLINE, inner_w);
+
+  int input_row = sep_row + 1;
   if (active) {
     wattron(stdscr, COLOR_PAIR(CP_BORDER_ACTIVE) | A_BOLD);
-    mvwprintw(stdscr, input_row, x + 1, ">%-*.*s", max_vis, max_vis, disp);
+    if (input_rows == 1) {
+      mvwprintw(stdscr, input_row, x + 1, ">%-*.*s", first_cap, first_cap,
+                g_ui.chat_input);
+    } else {
+      /* Wrap long chat input across 2 lines */
+      int total_cap = first_cap + inner_w;
+      const char *src = g_ui.chat_input;
+      if (input_len > total_cap)
+        src += (input_len - total_cap);
+      mvwprintw(stdscr, input_row, x + 1, ">%-*.*s", first_cap, first_cap, src);
+      mvwprintw(stdscr, input_row + 1, x + 1, "%-*.*s", inner_w, inner_w,
+                src + first_cap);
+    }
     wattroff(stdscr, COLOR_PAIR(CP_BORDER_ACTIVE) | A_BOLD);
   } else {
-    mvwprintw(stdscr, input_row, x + 1, ">%-*.*s", max_vis, max_vis,
-              len > 0 ? disp : "Press Tab to chat");
+    mvwprintw(stdscr, input_row, x + 1, ">%-*.*s", first_cap, first_cap,
+              input_len > 0 ? g_ui.chat_input : "Press Tab to chat");
   }
 }
 
 /* Draw persistent dashed Invites box on the bottom-right */
 static void render_invites_box(int y, int x, int h, int w) {
   int rem = ui_state_invite_remaining();
-  int active = (g_ui.focus == FOCUS_INVITES) || (rem > 0);
+  int has_freq = (g_ui.num_friend_reqs_in > 0);
+  int active = (g_ui.focus == FOCUS_INVITES) || (rem > 0) || has_freq;
   draw_box_style(stdscr, y, x, h, w, 1, active);
 
   wattron(stdscr, COLOR_PAIR(CP_TITLE) | A_BOLD);
@@ -203,7 +269,7 @@ static void render_invites_box(int y, int x, int h, int w) {
   int inner_w = w - 2;
   if (rem > 0) {
     wattron(stdscr, COLOR_PAIR(CP_CHAT_SYS) | A_BOLD);
-    mvwprintw(stdscr, y + 2, x + 2, "From: %-*.*s", inner_w - 7, inner_w - 7,
+    mvwprintw(stdscr, y + 2, x + 2, "Lobby: %-*.*s", inner_w - 8, inner_w - 8,
               g_ui.invite_from);
     mvwprintw(stdscr, y + 3, x + 2, "Expires: %ds", rem);
     wattroff(stdscr, COLOR_PAIR(CP_CHAT_SYS) | A_BOLD);
@@ -214,6 +280,21 @@ static void render_invites_box(int y, int x, int h, int w) {
 
     wattron(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
     mvwprintw(stdscr, y + 6, x + 2, "[Ctrl-D] Deny");
+    wattroff(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
+  } else if (has_freq) {
+    wattron(stdscr, COLOR_PAIR(CP_CHAT_SYS) | A_BOLD);
+    mvwprintw(stdscr, y + 2, x + 2,
+              "Friend Req (%d):", g_ui.num_friend_reqs_in);
+    mvwprintw(stdscr, y + 3, x + 2, "From: %-*.*s", inner_w - 7, inner_w - 7,
+              g_ui.friend_reqs_in[0]);
+    wattroff(stdscr, COLOR_PAIR(CP_CHAT_SYS) | A_BOLD);
+
+    wattron(stdscr, COLOR_PAIR(CP_SUCCESS) | A_BOLD);
+    mvwprintw(stdscr, y + 5, x + 2, "[Ctrl-A] Accept");
+    wattroff(stdscr, COLOR_PAIR(CP_SUCCESS) | A_BOLD);
+
+    wattron(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
+    mvwprintw(stdscr, y + 6, x + 2, "[Ctrl-D] Reject");
     wattroff(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
   } else {
     mvwprintw(stdscr, y + h / 2, x + 2, "%-*.*s", inner_w - 1, inner_w - 1,
@@ -274,7 +355,7 @@ static void render_modal(int rows, int cols) {
   }
 
   if (g_ui.modal == MODAL_PENDING_INVITES) {
-    int mh = 10, mw = 50;
+    int mh = 14, mw = 56;
     int my = (rows - mh) / 2;
     int mx = (cols - mw) / 2;
     for (int r = my; r < my + mh; r++)
@@ -282,24 +363,48 @@ static void render_modal(int rows, int cols) {
     draw_box_style(stdscr, my, mx, mh, mw, 0, 1);
 
     wattron(stdscr, COLOR_PAIR(CP_TITLE) | A_BOLD);
-    mvwprintw(stdscr, my, mx + 2, " Pending Invites ");
+    mvwprintw(stdscr, my, mx + 2, " Pending Friend & Lobby Invites ");
     wattroff(stdscr, COLOR_PAIR(CP_TITLE) | A_BOLD);
 
     int rem = ui_state_invite_remaining();
-    if (rem > 0) {
-      mvwprintw(stdscr, my + 3, mx + 3, "1. Lobby invite from %s (%ds left)",
-                g_ui.invite_from, rem);
+    int total = g_ui.num_friend_reqs_in + (rem > 0 ? 1 : 0);
+    if (g_ui.modal_idx >= total)
+      g_ui.modal_idx = total > 0 ? total - 1 : 0;
+
+    if (total == 0) {
+      mvwprintw(stdscr, my + 4, mx + 3,
+                "No pending friend or lobby invites at the moment.");
+    } else {
+      int row_offset = 0;
+      for (int i = 0; i < g_ui.num_friend_reqs_in && row_offset < mh - 6; i++) {
+        int sel = (g_ui.modal_idx == row_offset);
+        if (sel)
+          wattron(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
+        mvwprintw(stdscr, my + 2 + row_offset, mx + 3,
+                  "%d. Friend request from %-16s", row_offset + 1,
+                  g_ui.friend_reqs_in[i]);
+        if (sel)
+          wattroff(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
+        row_offset++;
+      }
+      if (rem > 0 && row_offset < mh - 6) {
+        int sel = (g_ui.modal_idx == row_offset);
+        if (sel)
+          wattron(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
+        mvwprintw(stdscr, my + 2 + row_offset, mx + 3,
+                  "%d. Lobby invite from %-14s (%ds left)", row_offset + 1,
+                  g_ui.invite_from, rem);
+        if (sel)
+          wattroff(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
+      }
       wattron(stdscr, COLOR_PAIR(CP_SUCCESS) | A_BOLD);
-      mvwprintw(stdscr, my + 5, mx + 3, "[A / Enter] Accept");
+      mvwprintw(stdscr, my + mh - 4, mx + 3, "[A / Enter] Accept");
       wattroff(stdscr, COLOR_PAIR(CP_SUCCESS) | A_BOLD);
       wattron(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
-      mvwprintw(stdscr, my + 5, mx + 25, "[D / X] Reject");
+      mvwprintw(stdscr, my + mh - 4, mx + 26, "[D / X] Reject");
       wattroff(stdscr, COLOR_PAIR(CP_ERROR) | A_BOLD);
-    } else {
-      mvwprintw(stdscr, my + 4, mx + 3,
-                "No pending invitations at the moment.");
     }
-    mvwprintw(stdscr, my + mh - 2, mx + 3, "[Esc] Close");
+    mvwprintw(stdscr, my + mh - 2, mx + 3, "[Up/Down] Select    [Esc] Close");
   }
 }
 
@@ -376,18 +481,27 @@ static void render_screen_friends(int y, int x, int h, int w, int rx, int rw) {
   wattroff(stdscr, COLOR_PAIR(CP_TITLE) | A_BOLD);
 
   int max_rows = box_h - 5;
-  if (g_ui.num_friends == 0) {
+  int row_idx = 0;
+  if (g_ui.num_friends == 0 && g_ui.num_friend_reqs_out == 0) {
     mvwprintw(stdscr, y + 3, x + 4, "No friends added yet.");
   } else {
-    for (int i = 0; i < g_ui.num_friends && i < max_rows; i++) {
+    for (int i = 0; i < g_ui.num_friends && row_idx < max_rows; i++) {
       FriendEntry *f = &g_ui.friends[i];
       int sel = (g_ui.focus == FOCUS_MAIN && g_ui.main_idx == i);
       if (sel)
         wattron(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
-      mvwprintw(stdscr, y + 3 + i, x + 4, "%d. %-16s (%s)  [X: remove?]", i + 1,
-                f->name, f->online ? "online" : "offline");
+      mvwprintw(stdscr, y + 3 + row_idx, x + 4, "%d. %-16s (%s)  [X: remove?]",
+                i + 1, f->name, f->online ? "online" : "offline");
       if (sel)
         wattroff(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
+      row_idx++;
+    }
+    for (int i = 0; i < g_ui.num_friend_reqs_out && row_idx < max_rows; i++) {
+      wattron(stdscr, COLOR_PAIR(CP_CHAT_SYS));
+      mvwprintw(stdscr, y + 3 + row_idx, x + 4, "* %-16s (request sent...)",
+                g_ui.friend_reqs_out[i]);
+      wattroff(stdscr, COLOR_PAIR(CP_CHAT_SYS));
+      row_idx++;
     }
   }
 
@@ -397,7 +511,13 @@ static void render_screen_friends(int y, int x, int h, int w, int rx, int rw) {
                g_ui.focus == FOCUS_MAIN && g_ui.main_idx == add_idx);
 
   /* Right side: Pending invites & Go back */
-  print_button(stdscr, y + 3, rx + 1, "Pending invites",
+  char pend_label[32];
+  if (g_ui.num_friend_reqs_in > 0)
+    snprintf(pend_label, sizeof(pend_label), "Pending (%d)",
+             g_ui.num_friend_reqs_in);
+  else
+    snprintf(pend_label, sizeof(pend_label), "Pending invites");
+  print_button(stdscr, y + 3, rx + 1, pend_label,
                g_ui.focus == FOCUS_SIDE && g_ui.side_idx == 0);
   print_button(stdscr, y + 6, rx + 1, "Go back",
                g_ui.focus == FOCUS_SIDE && g_ui.side_idx == 1);
@@ -423,16 +543,19 @@ static void render_screen_online_players(int y, int x, int h, int w, int rx,
       OnlineUser *u = &g_ui.online_users[i];
       int pts = ui_state_user_points(u->name);
       int is_me = (strcmp(u->name, g_ui.me) == 0);
-      int is_fr = ui_state_is_friend(u->name);
+      int fst = ui_state_friend_status(u->name);
       int sel = (g_ui.focus == FOCUS_MAIN && g_ui.main_idx == i);
+
+      const char *tag = is_me      ? "(you)"
+                        : fst == 1 ? "[friend]"
+                        : fst == 2 ? "[accept req?]"
+                        : fst == 3 ? "[req sent]"
+                                   : "[Enter/A: add?]";
 
       if (sel)
         wattron(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
       mvwprintw(stdscr, y + 3 + i, x + 4, "%d. %-14s, %3d pts  %s", i + 1,
-                u->name, pts,
-                is_me   ? "(you)"
-                : is_fr ? "[friend]"
-                        : "[Enter/A: add?]");
+                u->name, pts, tag);
       if (sel)
         wattroff(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
     }
@@ -459,16 +582,19 @@ static void render_screen_ranking(int y, int x, int h, int w, int rx, int rw) {
     for (int i = 0; i < g_ui.num_rankings && i < max_rows; i++) {
       RankEntry *r = &g_ui.rankings[i];
       int is_me = (strcmp(r->name, g_ui.me) == 0);
-      int is_fr = ui_state_is_friend(r->name);
+      int fst = ui_state_friend_status(r->name);
       int sel = (g_ui.focus == FOCUS_MAIN && g_ui.main_idx == i);
+
+      const char *tag = is_me      ? "(you)"
+                        : fst == 1 ? "[friend]"
+                        : fst == 2 ? "[accept?]"
+                        : fst == 3 ? "[req sent]"
+                                   : "[add?]";
 
       if (sel)
         wattron(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
       mvwprintw(stdscr, y + 3 + i, x + 4, "%d. %-13s %3d pts (%dW/%dL/%dD) %s",
-                r->pos, r->name, r->points, r->wins, r->losses, r->draws,
-                is_me   ? "(you)"
-                : is_fr ? "[friend]"
-                        : "[add?]");
+                r->pos, r->name, r->points, r->wins, r->losses, r->draws, tag);
       if (sel)
         wattroff(stdscr, COLOR_PAIR(CP_SELECTED) | A_BOLD);
     }
@@ -893,19 +1019,34 @@ static void handle_modal_key(int ch) {
   }
 
   if (g_ui.modal == MODAL_PENDING_INVITES) {
+    int rem = ui_state_invite_remaining();
+    int total = g_ui.num_friend_reqs_in + (rem > 0 ? 1 : 0);
     if (ch == 27 || ch == 'q' || ch == 'Q') {
       g_ui.modal = MODAL_NONE;
       g_ui.focus = FOCUS_MAIN;
+    } else if (ch == KEY_UP && g_ui.modal_idx > 0) {
+      g_ui.modal_idx--;
+    } else if (ch == KEY_DOWN && g_ui.modal_idx < total - 1) {
+      g_ui.modal_idx++;
     } else if ((ch == 'a' || ch == 'A' || ch == '\n' || ch == '\r') &&
-               ui_state_invite_remaining() > 0) {
-      g_ui.modal = MODAL_NONE;
-      g_ui.focus = FOCUS_MAIN;
-      send_line(g_ui.sock, "/accept");
+               total > 0) {
+      if (g_ui.modal_idx < g_ui.num_friend_reqs_in) {
+        send_line(g_ui.sock, "/friend %s", g_ui.friend_reqs_in[g_ui.modal_idx]);
+      } else if (rem > 0) {
+        g_ui.modal = MODAL_NONE;
+        g_ui.focus = FOCUS_MAIN;
+        send_line(g_ui.sock, "/accept");
+      }
     } else if ((ch == 'd' || ch == 'D' || ch == 'x' || ch == 'X') &&
-               ui_state_invite_remaining() > 0) {
-      g_ui.modal = MODAL_NONE;
-      g_ui.focus = FOCUS_MAIN;
-      send_line(g_ui.sock, "/deny");
+               total > 0) {
+      if (g_ui.modal_idx < g_ui.num_friend_reqs_in) {
+        send_line(g_ui.sock, "/unfriend %s",
+                  g_ui.friend_reqs_in[g_ui.modal_idx]);
+      } else if (rem > 0) {
+        g_ui.modal = MODAL_NONE;
+        g_ui.focus = FOCUS_MAIN;
+        send_line(g_ui.sock, "/deny");
+      }
     }
   }
 }
@@ -918,6 +1059,7 @@ static void handle_chat_key(int ch) {
   if (ch == '\n' || ch == '\r') {
     if (g_ui.chat_input[0] != '\0') {
       if (g_ui.chat_input[0] == '/') {
+        net_client_notify_chat_cmd(g_ui.chat_input);
         send_line(g_ui.sock, "%s", g_ui.chat_input);
       } else {
         send_line(g_ui.sock, "/say %s", g_ui.chat_input);
@@ -964,15 +1106,25 @@ void ui_handle_key(int ch) {
   if (ch == KEY_RESIZE)
     return;
 
-  /* Global shortcut for accepting/denying pending lobby invites:
+  /* Global shortcut for accepting/denying pending lobby or friend invites:
    * Ctrl-A (1) to accept, Ctrl-D (4) to deny */
-  if (ch == 1 && ui_state_invite_remaining() > 0) {
-    send_line(g_ui.sock, "/accept");
-    return;
+  if (ch == 1) {
+    if (ui_state_invite_remaining() > 0) {
+      send_line(g_ui.sock, "/accept");
+      return;
+    } else if (g_ui.num_friend_reqs_in > 0) {
+      send_line(g_ui.sock, "/friend %s", g_ui.friend_reqs_in[0]);
+      return;
+    }
   }
-  if (ch == 4 && ui_state_invite_remaining() > 0) {
-    send_line(g_ui.sock, "/deny");
-    return;
+  if (ch == 4) {
+    if (ui_state_invite_remaining() > 0) {
+      send_line(g_ui.sock, "/deny");
+      return;
+    } else if (g_ui.num_friend_reqs_in > 0) {
+      send_line(g_ui.sock, "/unfriend %s", g_ui.friend_reqs_in[0]);
+      return;
+    }
   }
 
   if (g_ui.modal != MODAL_NONE) {

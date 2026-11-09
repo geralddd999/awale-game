@@ -103,6 +103,7 @@ typedef struct {
   int side_idx;
   int list_scroll;
   int sub_action_idx;
+  int modal_idx;
 
   /* Status notification bar */
   char status_msg[128];
@@ -138,6 +139,10 @@ typedef struct {
   /* Cached server lists */
   FriendEntry friends[MAX_USERS];
   int num_friends;
+  char friend_reqs_in[MAX_USERS][NAME_LEN + 1];
+  int num_friend_reqs_in;
+  char friend_reqs_out[MAX_USERS][NAME_LEN + 1];
+  int num_friend_reqs_out;
 
   OnlineUser online_users[MAX_CLIENTS];
   int num_online;
@@ -193,6 +198,8 @@ void ui_state_add_chat(ChatKind kind, const char *sender, const char *text);
 int ui_state_invite_remaining(void);
 int ui_state_user_points(const char *name);
 int ui_state_is_friend(const char *name);
+/* 0 = none, 1 = mutual friend, 2 = incoming request, 3 = outgoing request */
+int ui_state_friend_status(const char *name);
 long long ui_now_ms(void);
 
 #endif

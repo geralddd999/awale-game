@@ -5,9 +5,27 @@
 #include <string.h>
 
 static int pending_recreate = 0; /* 0 = none, 1 = public, 2 = private */
+static int bio_from_chat = 0;
+static int bio_is_self = 0;
+static int bio_chat_lines_left = 0;
 
 static int starts_with(const char *s, const char *prefix) {
   return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+void net_client_notify_chat_cmd(const char *cmd) {
+  if (starts_with(cmd, "/bio") && !starts_with(cmd, "/bio set")) {
+    bio_from_chat = 1;
+  } else if (starts_with(cmd, "/msg ")) {
+    char target[NAME_LEN + 1];
+    int n = 0;
+    if (sscanf(cmd, "/msg %16s %n", target, &n) == 1 && n > 0 &&
+        cmd[n] != '\0') {
+      char label[NAME_LEN + 8];
+      snprintf(label, sizeof(label), "to %s", target);
+      ui_state_add_chat(CHAT_PM, label, cmd + n);
+    }
+  }
 }
 
 void net_client_toggle_lobby_privacy(void) {
@@ -123,7 +141,17 @@ void net_client_handle_line(const char *line) {
   }
 
   if (sscanf(line, "FRIEND %16s %15s", a, b) == 2) {
-    if (g_ui.num_friends < MAX_USERS) {
+    if (strcmp(b, "incoming") == 0) {
+      if (g_ui.num_friend_reqs_in < MAX_USERS) {
+        snprintf(g_ui.friend_reqs_in[g_ui.num_friend_reqs_in++], NAME_LEN + 1,
+                 "%s", a);
+      }
+    } else if (strcmp(b, "outgoing") == 0) {
+      if (g_ui.num_friend_reqs_out < MAX_USERS) {
+        snprintf(g_ui.friend_reqs_out[g_ui.num_friend_reqs_out++], NAME_LEN + 1,
+                 "%s", a);
+      }
+    } else if (g_ui.num_friends < MAX_USERS) {
       FriendEntry *f = &g_ui.friends[g_ui.num_friends++];
       snprintf(f->name, sizeof(f->name), "%s", a);
       f->online = (strcmp(b, "online") == 0);
@@ -160,14 +188,23 @@ void net_client_handle_line(const char *line) {
   }
 
   if (starts_with(line, "BIO ")) {
-    if (g_ui.bio_count < BIO_LINES) {
+    if (bio_is_self && g_ui.bio_count < BIO_LINES) {
       snprintf(g_ui.bio_lines[g_ui.bio_count++], BIO_LINE_LEN + 1, "%s",
                line + 4);
+    }
+    if (bio_chat_lines_left > 0) {
+      ui_state_add_chat(CHAT_SYSTEM, "Bio", line + 4);
+      bio_chat_lines_left--;
     }
     return;
   }
 
   /* OK replies */
+  if (starts_with(line, "OK help")) {
+    const char *cmds = (strlen(line) > 8) ? (line + 8) : "";
+    ui_state_add_chat(CHAT_SYSTEM, "Help", cmds);
+    return;
+  }
   if (sscanf(line, "OK login %16s", a) == 1) {
     snprintf(msg, sizeof(msg), "Logged in as %s", a);
     ui_state_set_status(msg, 0);
@@ -190,6 +227,8 @@ void net_client_handle_line(const char *line) {
 
   if (sscanf(line, "OK friends %d", &v1) == 1) {
     g_ui.num_friends = 0;
+    g_ui.num_friend_reqs_in = 0;
+    g_ui.num_friend_reqs_out = 0;
     return;
   }
 
@@ -204,8 +243,22 @@ void net_client_handle_line(const char *line) {
   }
 
   if (sscanf(line, "OK bio %16s %d", a, &v1) == 2) {
-    snprintf(g_ui.bio_owner, sizeof(g_ui.bio_owner), "%s", a);
-    g_ui.bio_count = 0;
+    bio_is_self = (strcmp(a, g_ui.me) == 0);
+    if (bio_is_self) {
+      snprintf(g_ui.bio_owner, sizeof(g_ui.bio_owner), "%s", a);
+      g_ui.bio_count = 0;
+    }
+    if (bio_from_chat || !bio_is_self) {
+      bio_from_chat = 0;
+      bio_chat_lines_left = v1;
+      if (v1 == 0) {
+        snprintf(msg, sizeof(msg), "Bio of %s: (empty)", a);
+        ui_state_add_chat(CHAT_SYSTEM, "Bio", msg);
+      } else {
+        snprintf(msg, sizeof(msg), "Bio of %s:", a);
+        ui_state_add_chat(CHAT_SYSTEM, "Bio", msg);
+      }
+    }
     return;
   }
 
@@ -216,14 +269,17 @@ void net_client_handle_line(const char *line) {
   }
 
   if (sscanf(line, "OK friend %16s", a) == 1) {
-    snprintf(msg, sizeof(msg), "Added %s as friend", a);
+    if (ui_state_friend_status(a) == 2)
+      snprintf(msg, sizeof(msg), "Accepted friend request from %s", a);
+    else
+      snprintf(msg, sizeof(msg), "Friend request sent to %s", a);
     ui_state_set_status(msg, 0);
     send_line(g_ui.sock, "/friend");
     return;
   }
 
   if (sscanf(line, "OK unfriend %16s", a) == 1) {
-    snprintf(msg, sizeof(msg), "Removed %s from friends", a);
+    snprintf(msg, sizeof(msg), "Removed %s from friends/requests", a);
     ui_state_set_status(msg, 0);
     send_line(g_ui.sock, "/friend");
     return;
@@ -421,6 +477,27 @@ void net_client_handle_line(const char *line) {
     snprintf(msg, sizeof(msg), "%s invited you to their lobby!", a);
     ui_state_set_status(msg, 0);
     ui_state_add_chat(CHAT_SYSTEM, "Invite", msg);
+    return;
+  }
+
+  if (sscanf(line, "EVT FRIEND_REQ %16s", a) == 1) {
+    snprintf(msg, sizeof(msg), "%s sent you a friend request!", a);
+    ui_state_set_status(msg, 0);
+    ui_state_add_chat(CHAT_SYSTEM, "Friends", msg);
+    send_line(g_ui.sock, "/friend");
+    return;
+  }
+
+  if (sscanf(line, "EVT FRIEND_ACCEPT %16s", a) == 1) {
+    snprintf(msg, sizeof(msg), "%s accepted your friend request!", a);
+    ui_state_set_status(msg, 0);
+    ui_state_add_chat(CHAT_SYSTEM, "Friends", msg);
+    send_line(g_ui.sock, "/friend");
+    return;
+  }
+
+  if (sscanf(line, "EVT UNFRIEND %16s", a) == 1) {
+    send_line(g_ui.sock, "/friend");
     return;
   }
 
